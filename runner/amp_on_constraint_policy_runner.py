@@ -14,7 +14,7 @@ from modules import ActorCriticBarlowTwins
 from algorithm import AMPNP3O,NP3O
 from envs.vec_env import VecEnv
 from algorithm.amp_discriminator import AMPDiscriminator
-from algorithm.datasets.motion_loader import AMPLoader
+from algorithm.datasets.motion_loader import AMPLoader, motion_layout_from_legged_cfg
 from utils import Normalizer
 from utils.helpers import hard_phase_schedualer, partial_checkpoint_load
 from copy import copy, deepcopy
@@ -55,10 +55,13 @@ class AMPOnConstraintPolicyRunner:
         actor_critic.to(self.device)
 
         # Create algorithm
+        _ml = motion_layout_from_legged_cfg(self.env.cfg)
         amp_data = AMPLoader(
             device, time_between_frames=self.env.dt, preload_transitions=True,
             num_preload_transitions=train_cfg['runner']['amp_num_preload_transitions'],
-            motion_files=self.cfg["amp_motion_files"])
+            motion_files=self.cfg["amp_motion_files"],
+            motion_layout=_ml if _ml else None,
+        )
         amp_normalizer = Normalizer(amp_data.observation_dim)
         discriminator = AMPDiscriminator(
             amp_data.observation_dim * 2,

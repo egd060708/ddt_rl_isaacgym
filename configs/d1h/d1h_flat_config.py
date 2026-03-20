@@ -426,7 +426,7 @@ class D1HFlatCfg( LeggedRobotCfg ):
         hip_scale_reduction = 0.5
         use_filter = True
 
-    class commands( LeggedRobotCfg.control ):
+    class commands( LeggedRobotCfg.commands ):
         curriculum = True 
         max_curriculum = 1.0
         max_curriculum_x = 2.0
@@ -437,6 +437,7 @@ class D1HFlatCfg( LeggedRobotCfg ):
         resampling_time = 5.  # time before command are changed[s]
         heading_command = False  # if true: compute ang vel command from heading error
         global_reference = False
+        zero_min_cmd = False
         class ranges:
             lin_vel_x = [-1.0, 1.0]  # min max [m/s]
             lin_vel_y = [-1.0, 1.0]  # min max [m/s]

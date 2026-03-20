@@ -4,7 +4,7 @@ from isaacgym import gymtorch, gymapi, gymutil
 import torch
 # config
 from configs.d1.d1_flat_config import D1Flat, D1FlatCfg, D1FlatCfgPPO
-from algorithm.datasets.motion_loader import AMPLoader
+from algorithm.datasets.motion_loader import AMPLoader, motion_layout_from_legged_cfg
 import glob
 MOTION_FILES = glob.glob('resources/d1/datasets/all/*')
 
@@ -29,7 +29,13 @@ class D1AMPFlat(D1Flat):
         super().__init__(self.cfg, sim_params, physics_engine, sim_device, headless)
 
         if self.cfg.env.reference_state_initialization:
-            self.amp_loader = AMPLoader(motion_files=self.cfg.env.amp_motion_files, device=self.device, time_between_frames=self.dt)
+            _ml = motion_layout_from_legged_cfg(self.cfg)
+            self.amp_loader = AMPLoader(
+                motion_files=self.cfg.env.amp_motion_files,
+                device=self.device,
+                time_between_frames=self.dt,
+                motion_layout=_ml if _ml else None,
+            )
 
     def _get_feet_local_pos_vel(self):
         N = self.num_envs
@@ -76,8 +82,8 @@ class D1AMPFlat(D1Flat):
             env_ids (List[int]): Environemnt ids
             frames: AMP frames to initialize motion with
         """
-        self.dof_pos[env_ids] = AMPLoader.get_joint_pose_batch(frames)
-        self.dof_vel[env_ids] = AMPLoader.get_joint_vel_batch(frames)
+        self.dof_pos[env_ids] = self.amp_loader.get_joint_pose_batch(frames)
+        self.dof_vel[env_ids] = self.amp_loader.get_joint_vel_batch(frames)
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         self.gym.set_dof_state_tensor_indexed(self.sim,
                                               gymtorch.unwrap_tensor(self.dof_state),
@@ -91,14 +97,14 @@ class D1AMPFlat(D1Flat):
             env_ids (List[int]): Environemnt ids
         """
         # base position
-        root_pos = AMPLoader.get_root_pos_batch(frames)
+        root_pos = self.amp_loader.get_root_pos_batch(frames)
         root_pos[:, :2] = root_pos[:, :2] + self.env_origins[env_ids, :2]
         self.root_states[env_ids, :3] = root_pos
-        root_orn = AMPLoader.get_root_rot_batch(frames)
+        root_orn = self.amp_loader.get_root_rot_batch(frames)
 
         self.root_states[env_ids, 3:7] = root_orn
-        self.root_states[env_ids, 7:10] = quat_rotate(root_orn, AMPLoader.get_linear_vel_batch(frames))
-        self.root_states[env_ids, 10:13] = quat_rotate(root_orn, AMPLoader.get_angular_vel_batch(frames))
+        self.root_states[env_ids, 7:10] = quat_rotate(root_orn, self.amp_loader.get_linear_vel_batch(frames))
+        self.root_states[env_ids, 10:13] = quat_rotate(root_orn, self.amp_loader.get_angular_vel_batch(frames))
 
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         self.gym.set_actor_root_state_tensor_indexed(self.sim,
@@ -259,6 +265,21 @@ class D1AMPFlatCfg(D1FlatCfg):
         reference_state_initialization = False
         reference_state_initialization_prob = 0.85
         amp_motion_files = MOTION_FILES
+
+        # AMP 数据集每帧布局（与 resources/d1/datasets 中 JSON 一致）；部署其它机型请复制并改尺寸
+        class amp_motion_layout:
+            pos_size = 3
+            rot_size = 4
+            joint_pos_size = 16
+            joint_vel_size = 16
+            tar_toe_pos_local_size = 12
+            tar_toe_vel_local_size = 12
+            linear_vel_size = 3
+            angular_vel_size = 3
+            # d1 四足
+            amp_feed_forward_style = "d1_without_wheel_pos"
+            # 若为 None，则按 trajectories 宽度自动推算（d1 与旧逻辑兼容）
+            amp_observation_dim = None
         
     class commands( D1FlatCfg.commands ):
         curriculum = False 
