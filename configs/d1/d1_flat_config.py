@@ -318,16 +318,17 @@ class D1FlatCfg( LeggedRobotCfg ):
         hip_scale_reduction = 0.5
         use_filter = True
 
-    class commands( LeggedRobotCfg.control ):
-        curriculum = True 
+    class commands( LeggedRobotCfg.commands ):
+        curriculum = False 
         max_curriculum = 3.0
         num_commands = 4  # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
         resampling_time = 10.  # time before command are changed[s]
         heading_command = True  # if true: compute ang vel command from heading error
         global_reference = False
+        zero_min_cmd = False
 
         class ranges:
-            lin_vel_x = [-1.0, 1.0]  # min max [m/s]
+            lin_vel_x = [-1.5, 1.5]  # min max [m/s]
             lin_vel_y = [-1.0, 1.0]  # min max [m/s]
             ang_vel_yaw = [-1, 1]  # min max [rad/s]
             heading = [-3.14, 3.14]
@@ -395,8 +396,8 @@ class D1FlatCfg( LeggedRobotCfg ):
             default_joint = 0.0
 
     class terrain(LeggedRobotCfg.terrain):
-        mesh_type = 'trimesh'  # "heightfield" # none, plane, heightfield or trimesh
-        curriculum = True
+        mesh_type = 'plane'  # "heightfield" # none, plane, heightfield or trimesh
+        curriculum = False
         measure_heights = True
         include_act_obs_pair_buf = False
         # terrain types: [smooth slope, rough slope, stairs up, stairs down, discrete, stepping stones, gap]
@@ -414,7 +415,7 @@ class D1FlatCfg_Play( D1FlatCfg ):
     class env(D1FlatCfg.env):
         num_envs = 10
     class terrain(D1FlatCfg.terrain):
-        mesh_type = 'trimesh'  # "heightfield" # none, plane, heightfield or trimesh
+        mesh_type = 'plane'  # "heightfield" # none, plane, heightfield or trimesh
         num_rows = 5
         num_cols = 5
         # terrain types: [smooth slope, rough slope, stairs up, stairs down, discrete]
@@ -442,10 +443,11 @@ class D1FlatCfg_Play( D1FlatCfg ):
         disturbance = False
         randomize_kpkd = False
     class commands( D1FlatCfg.commands ):
+        resampling_time = 2.
         heading_command = True  # if true: compute ang vel command from heading error
         class ranges:
-            lin_vel_x = [3.0, 0.0]  # min max [m/s]
-            lin_vel_y = [-0.0, 0.0]  # min max [m/s]
+            lin_vel_x = [0.0, 0.0]  # min max [m/s]
+            lin_vel_y = [0.1, 0.1]  # min max [m/s]
             ang_vel_yaw = [-0, 0]  # min max [rad/s]
             heading = [-0.0, 0.0]
             

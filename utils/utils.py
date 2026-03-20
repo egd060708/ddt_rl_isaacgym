@@ -155,4 +155,43 @@ def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True):
     out[final_mask] = q0[final_mask]
     return out
 
+def quaternion_slerp_safe(q0, q1, fraction, spin=0, shortestpath=True):
+    # ===== 1. normalize =====
+    q0 = torch.nn.functional.normalize(q0, dim=-1)
+    q1 = torch.nn.functional.normalize(q1, dim=-1)
+
+    # ===== 2. dot =====
+    d = torch.sum(q0 * q1, dim=-1, keepdim=True)
+
+    # ===== 3. shortest path =====
+    if shortestpath:
+        mask = d < 0
+        q1 = torch.where(mask, -q1, q1)
+        d = torch.where(mask, -d, d)
+
+    # ===== 4. clamp（关键）=====
+    d = torch.clamp(d, -1.0, 1.0)
+
+    # ===== 5. angle =====
+    angle = torch.acos(d)
+
+    # ===== 6. sin(theta) =====
+    sin_theta = torch.sin(angle)
+
+    # ===== 7. small angle fallback =====
+    small_mask = sin_theta < 1e-6
+
+    # ===== 8. slerp =====
+    w0 = torch.sin((1.0 - fraction) * angle) / (sin_theta + 1e-8)
+    w1 = torch.sin(fraction * angle) / (sin_theta + 1e-8)
+
+    result = w0 * q0 + w1 * q1
+
+    # ===== 9. fallback: lerp =====
+    lerp = (1.0 - fraction) * q0 + fraction * q1
+
+    result = torch.where(small_mask, lerp, result)
+
+    return torch.nn.functional.normalize(result, dim=-1)
+
 

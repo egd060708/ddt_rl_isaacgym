@@ -126,7 +126,10 @@ def play(args):
         actions = policy.act_teacher(obs.half())
         # actions = torch.clamp(actions,-1.2,1.2)
         # actions = policy(obs.detach())
-        obs, privileged_obs, rewards,costs,dones, infos = env.step(actions)
+        if train_cfg.runner.runner_class_name == "AMPOnConstraintPolicyRunner":
+            obs, privileged_obs, rewards,costs,dones, infos, _, _ = env.step(actions)
+        else:
+            obs, privileged_obs, rewards,costs,dones, infos = env.step(actions)
         env.gym.step_graphics(env.sim) # required to render in headless mode
         env.gym.render_all_camera_sensors(env.sim)
         if RECORD_FRAMES:

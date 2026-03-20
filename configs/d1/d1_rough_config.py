@@ -276,7 +276,7 @@ class D1RoughCfg( LeggedRobotCfg ):
         hip_scale_reduction = 0.5
         use_filter = True
 
-    class commands( LeggedRobotCfg.control ):
+    class commands( LeggedRobotCfg.commands ):
         curriculum = False
         max_curriculum = 1.
         num_commands = 4  # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)

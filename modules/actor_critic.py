@@ -459,6 +459,7 @@ class ActorCriticBarlowTwins(nn.Module):
                         critic_hidden_dims=[256, 256, 256],
                         activation='elu',
                         init_noise_std=1.0,
+                        fixed_std=False,
                         **kwargs):
         super(ActorCriticBarlowTwins, self).__init__()
 
@@ -534,7 +535,9 @@ class ActorCriticBarlowTwins(nn.Module):
         self.cost = nn.Sequential(*cost_layers)
 
         # Action noise
-        self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
+        self.fixed_std = fixed_std
+        std = init_noise_std * torch.ones(num_actions)
+        self.std = torch.tensor(std) if fixed_std else nn.Parameter(std)
         self.distribution = None
         # disable args validation for speedup
         Normal.set_default_validate_args = False
@@ -673,3 +676,4 @@ class ActorCriticBarlowTwins(nn.Module):
                             export_params=True
                             )
         # print(torch_out)
+
