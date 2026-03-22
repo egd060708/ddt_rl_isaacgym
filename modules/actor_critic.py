@@ -1,3 +1,4 @@
+import os
 import numpy as np
 
 import torch
@@ -7,6 +8,20 @@ import torch.nn.functional as F
 from modules.common_modules import MAE, VQVAE, VQVAE_CNN, VQVAE_EMA, VQVAE_RNN, AutoEncoder, BetaVAE, CnnHistoryEncoder, MixedLayerNormMlp, MixedLipMlp, MixedMlp, RnnBarlowTwinsStateHistoryEncoder, RnnDoubleHeadEncoder, RnnEncoder, RnnStateHistoryEncoder, StateHistoryEncoder, VQVAE_Trans, VQVAE_vel, VQVAE_vel_conv, get_activation, mlp_batchnorm_factory, mlp_factory, mlp_layernorm_factory
 from modules.normalizer import EmpiricalNormalization
 from modules.transformer_modules import ActionCausalTransformer, StateCausalClsTransformer, StateCausalHeadlessTransformer, StateCausalTransformer
+
+
+def _resolve_policy_export_dir(checkpoint_or_dir):
+    """
+    Directory for exported ``model.pt`` / ``model.onnx`` — same folder as the loaded checkpoint.
+    ``checkpoint_or_dir`` may be the full path to ``model_*.pt`` or an explicit directory.
+    """
+    p = os.path.abspath(checkpoint_or_dir)
+    if os.path.isdir(p):
+        return p
+    d = os.path.dirname(p)
+    return d if d else os.getcwd()
+
+
 class Config:
     def __init__(self):
         self.n_obs = 45
@@ -440,11 +455,14 @@ class ActorCriticRMA(nn.Module):
         self.scan_encoder.eval()
         self.priv_encoder.eval()
     
-    def save_torch_jit_policy(self,path,device):
-        obs_demo_input = torch.randn(1,self.num_prop).to(device)
-        hist_demo_input = torch.randn(1,self.num_hist,self.num_prop).to(device)
-        model_jit = torch.jit.trace(self.actor_student_backbone,(obs_demo_input,hist_demo_input))
-        model_jit.save(path)
+    def save_torch_jit_policy(self, checkpoint_path, device):
+        """Export TorchScript next to the training checkpoint (``model.pt`` in that folder)."""
+        export_dir = _resolve_policy_export_dir(checkpoint_path)
+        out_pt = os.path.join(export_dir, "model.pt")
+        obs_demo_input = torch.randn(1, self.num_prop).to(device)
+        hist_demo_input = torch.randn(1, self.num_hist, self.num_prop).to(device)
+        model_jit = torch.jit.trace(self.actor_student_backbone, (obs_demo_input, hist_demo_input))
+        model_jit.save(out_pt)
 
 class ActorCriticBarlowTwins(nn.Module):
     is_recurrent = False
@@ -657,23 +675,29 @@ class ActorCriticBarlowTwins(nn.Module):
     def imitation_mode(self):
         pass
     
-    def save_torch_jit_policy(self,path,device):
+    def save_torch_jit_policy(self, checkpoint_path, device):
+        """Export TorchScript and ONNX next to the training checkpoint (``model.pt`` / ``model.onnx``)."""
         self.actor_teacher_backbone.eval()
+        export_dir = _resolve_policy_export_dir(checkpoint_path)
+        out_pt = os.path.join(export_dir, "model.pt")
+        out_onnx = os.path.join(export_dir, "model.onnx")
 
-        obs_demo_input = torch.randn(1,self.num_prop-3).half().to(device)
-        hist_demo_input = torch.randn(1,self.num_hist,self.num_prop-3).half().to(device)
-        model_jit = torch.jit.trace(self.actor_teacher_backbone,(obs_demo_input,hist_demo_input))
-        model_jit.save(path)
-        obs_demo_input = torch.randn(1,self.num_prop-3).to(device)
-        hist_demo_input = torch.randn(1,self.num_hist,self.num_prop-3).to(device)
-        torch_out = torch.onnx.export(self.actor_teacher_backbone,
-                            (obs_demo_input,hist_demo_input),
-                            "policy.onnx",
-                            input_names=["nn_input0", "nn_input1"],
-                            output_names=["nn_output"],
-                            verbose=False,
-                            opset_version=13,
-                            export_params=True
-                            )
-        # print(torch_out)
+        obs_demo_input = torch.randn(1, self.num_prop - 3).half().to(device)
+        hist_demo_input = torch.randn(1, self.num_hist, self.num_prop - 3).half().to(device)
+        model_jit = torch.jit.trace(
+            self.actor_teacher_backbone, (obs_demo_input, hist_demo_input)
+        )
+        model_jit.save(out_pt)
+        obs_demo_input = torch.randn(1, self.num_prop - 3).to(device)
+        hist_demo_input = torch.randn(1, self.num_hist, self.num_prop - 3).to(device)
+        torch.onnx.export(
+            self.actor_teacher_backbone,
+            (obs_demo_input, hist_demo_input),
+            out_onnx,
+            input_names=["nn_input0", "nn_input1"],
+            output_names=["nn_output"],
+            verbose=False,
+            opset_version=13,
+            export_params=True,
+        )
 

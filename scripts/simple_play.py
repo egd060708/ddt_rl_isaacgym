@@ -84,7 +84,7 @@ def play(args):
     # policy.half()
     policy.eval()
     policy = policy.to(env.device)
-    policy.save_torch_jit_policy('model.pt',env.device)
+    policy.save_torch_jit_policy(resume_path, env.device)
 
     # clear images under frames folder
     # frames_path = os.path.join(ROOT_DIR, 'logs', train_cfg.runner.experiment_name, 'exported', 'frames')
