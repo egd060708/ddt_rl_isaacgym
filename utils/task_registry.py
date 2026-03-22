@@ -9,7 +9,15 @@ from runner import OnConstraintPolicyRunner
 from runner import AMPOnConstraintPolicyRunner
 
 from global_config import ROOT_DIR, ENVS_DIR
-from .helpers import get_args, update_cfg_from_args, class_to_dict, get_load_path, set_seed, parse_sim_params
+from .helpers import (
+    get_args,
+    update_cfg_from_args,
+    class_to_dict,
+    get_load_path,
+    set_seed,
+    parse_sim_params,
+    save_run_config_snapshot,
+)
 from configs import LeggedRobotCfg, LeggedRobotCfgPPO
 
 class TaskRegistry():
@@ -113,7 +121,19 @@ class TaskRegistry():
             log_dir = None
         else:
             log_dir = os.path.join(log_root, datetime.now().strftime('%b%d_%H-%M-%S') + '_' + train_cfg.runner.run_name)
-        
+
+        if log_dir is not None:
+            _task_label = name if name is not None else getattr(
+                train_cfg.runner, "experiment_name", None
+            )
+            save_run_config_snapshot(
+                log_dir,
+                env.cfg,
+                train_cfg,
+                task_name=_task_label,
+                args=args,
+            )
+
         train_cfg_dict = class_to_dict(train_cfg)
         runner_class = eval(train_cfg.runner.runner_class_name)
         runner = runner_class(env, train_cfg_dict, log_dir, device=args.rl_device)

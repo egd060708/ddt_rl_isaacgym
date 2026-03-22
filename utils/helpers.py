@@ -238,3 +238,114 @@ def hard_phase_schedualer(max_iters,phase1_end):
     lag_schedual[phase1_end:] = True
     return act_schedual,imitation_schedual,lag_schedual
 
+
+def sanitize_config_for_dump(obj, _depth=0):
+    """将配置对象转为可 JSON/YAML 序列化的 Python 原生类型。"""
+    if _depth > 64:
+        return "<max_depth>"
+    # 必须先处理 numpy 标量：NumPy 2 中 np.float64 可能 isinstance(..., float) 为 True，
+    # 但仍是 numpy 类型，PyYAML safe_dump 无法序列化，必须用 .item() 转成 Python 内置类型。
+    if isinstance(obj, np.generic):
+        try:
+            return obj.item()
+        except Exception:
+            return str(obj)
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    if isinstance(obj, np.ndarray):
+        if obj.size > 4096:
+            return {"__ndarray__": f"shape={tuple(obj.shape)} dtype={obj.dtype}"}
+        return obj.tolist()
+    if isinstance(obj, torch.Tensor):
+        if obj.numel() > 4096:
+            return {"__tensor__": f"shape={tuple(obj.shape)} dtype={obj.dtype}"}
+        return obj.detach().cpu().tolist()
+    if isinstance(obj, type):
+        return {"__class__": f"{obj.__module__}.{obj.__qualname__}"}
+    if isinstance(obj, dict):
+        return {str(k): sanitize_config_for_dump(v, _depth + 1) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [sanitize_config_for_dump(v, _depth + 1) for v in obj]
+    if isinstance(obj, (set, frozenset)):
+        try:
+            seq = sorted(obj, key=lambda x: str(type(x)) + str(x))
+        except TypeError:
+            seq = list(obj)
+        return [sanitize_config_for_dump(v, _depth + 1) for v in seq]
+    if isinstance(obj, (bytes, bytearray)):
+        try:
+            return obj.decode("utf-8", errors="replace")
+        except Exception:
+            return str(obj)
+    if callable(obj) and not isinstance(obj, type):
+        return {"__callable__": getattr(obj, "__name__", str(obj))}
+    # 其余不可序列化对象
+    try:
+        return str(obj)
+    except Exception:
+        return "<non-serializable>"
+
+
+def save_run_config_snapshot(log_dir, env_cfg, train_cfg, task_name=None, args=None):
+    """
+    将本次训练使用的环境配置与训练配置保存到与 model_*.pt 相同的日志目录。
+
+    优先写入 config.yaml（需安装 PyYAML: pip install pyyaml）；
+    若未安装则写入 config.json。
+
+    Args:
+        log_dir: 与 checkpoint 相同的目录，例如 logs/<exp>/<timestamp>_runname/
+        env_cfg: LeggedRobotCfg 实例（已与命令行合并后）
+        train_cfg: LeggedRobotCfgPPO 实例（已与命令行合并后）
+        task_name: 注册任务名，如 d1_flat
+        args: get_args() 返回的命名空间，可选，用于记录命令行参数
+    """
+    if not log_dir:
+        return
+    os.makedirs(log_dir, exist_ok=True)
+
+    payload = {
+        "task_name": task_name,
+        "environment": sanitize_config_for_dump(class_to_dict(env_cfg)),
+        "training": sanitize_config_for_dump(class_to_dict(train_cfg)),
+    }
+    if args is not None:
+        try:
+            ad = vars(args) if hasattr(args, "__dict__") else dict(args)
+            payload["command_line_args"] = sanitize_config_for_dump(ad)
+        except Exception as e:
+            payload["command_line_args"] = {"__error__": str(e)}
+
+    yaml_path = os.path.join(log_dir, "config.yaml")
+    json_path = os.path.join(log_dir, "config.json")
+    try:
+        import yaml
+
+        try:
+            with open(yaml_path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(
+                    payload,
+                    f,
+                    sort_keys=False,
+                    allow_unicode=True,
+                    default_flow_style=False,
+                    width=120,
+                )
+            print(f"[config] 已保存运行配置(YAML): {yaml_path}")
+        except yaml.representer.RepresenterError:
+            import json
+
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, ensure_ascii=False)
+            print(
+                f"[config] YAML 序列化失败，已改为保存 JSON: {json_path}"
+            )
+    except ImportError:
+        import json
+
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+        print(
+            f"[config] 未安装 PyYAML，已保存为 JSON（可 pip install pyyaml 以使用 YAML）: {json_path}"
+        )
+

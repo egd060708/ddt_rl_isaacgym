@@ -295,7 +295,7 @@ class D1HAMPFlatCfg(D1HFlatCfg):
             amp_observation_dim = None
 
     class commands(D1HFlatCfg.commands):
-        curriculum = False
+        curriculum = True
         heading_command = False
 
 
@@ -325,10 +325,10 @@ class D1HAMPFlatCfg_Play(D1HAMPFlatCfg):
         heading_command = False  # if true: compute ang vel command from heading error
         resampling_time = 2.
         class ranges:
-            lin_vel_x = [0.0, 0.0]  # min max [m/s]
-            lin_vel_y = [0.1, 0.1]  # min max [m/s]
-            ang_vel_yaw = [-0, 0]  # min max [rad/s]
-            heading = [-0.0, 0.0]
+            lin_vel_x = [-1., 1.]  # min max [m/s]
+            lin_vel_y = [-1., 1.]  # min max [m/s]
+            ang_vel_yaw = [-1, 1]  # min max [rad/s]
+            heading = [-3.14, 3.14]
 
 
 class D1HAMPFlatCfgPPO(D1HFlatCfgPPO):
@@ -341,12 +341,12 @@ class D1HAMPFlatCfgPPO(D1HFlatCfgPPO):
         policy_class_name = "ActorCriticBarlowTwins"
         runner_class_name = "AMPOnConstraintPolicyRunner"
         algorithm_class_name = "AMPNP3O"
-        max_iterations = 6000
+        max_iterations = 40000
         num_steps_per_env = 24
         resume = False
         resume_path = ""
 
-        amp_reward_coef = 0.005
+        amp_reward_coef = 0.05
         amp_motion_files = MOTION_FILES_D1H
         amp_num_preload_transitions = 200000
         amp_task_reward_lerp = 0.5

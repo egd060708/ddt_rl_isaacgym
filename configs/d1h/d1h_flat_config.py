@@ -510,7 +510,7 @@ class D1HFlatCfg( LeggedRobotCfg ):
 
     class terrain(LeggedRobotCfg.terrain):
         mesh_type = 'plane'  # "heightfield" # none, plane, heightfield or trimesh
-        curriculum = True
+        curriculum = False
         measure_heights = True
         include_act_obs_pair_buf = False
         # terrain types: [smooth slope, rough slope, stairs up, stairs down, discrete, stepping stones, gap]
@@ -551,7 +551,7 @@ class D1HFlatCfg_Play( D1HFlatCfg ):
     class commands( D1HFlatCfg.commands ):
         heading_command = False  # if true: compute ang vel command from heading error
         class ranges:
-            lin_vel_x = [-1.0, 1.0]  # min max [m/s]
+            lin_vel_x = [1.0, 1.0]  # min max [m/s]
             lin_vel_y = [-1.0, 1.0]  # min max [m/s]
             ang_vel_yaw = [-1.0, 1.0]  # min max [rad/s]
             heading = [-3.14, 3.14]

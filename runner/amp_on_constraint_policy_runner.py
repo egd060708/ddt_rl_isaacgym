@@ -115,8 +115,12 @@ class AMPOnConstraintPolicyRunner:
         self.alg.discriminator.train()
 
         ep_infos = []
-        rewbuffer = deque(maxlen=100)
+        task_rewbuffer = deque(maxlen=100)
+        amp_rewbuffer = deque(maxlen=100)
+        total_rewbuffer = deque(maxlen=100)
         lenbuffer = deque(maxlen=100)
+        cur_task_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        cur_amp_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
         cur_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
         cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
@@ -162,8 +166,14 @@ class AMPOnConstraintPolicyRunner:
                     next_amp_obs_with_term = torch.clone(next_amp_obs)
                     next_amp_obs_with_term[reset_env_ids] = terminal_amp_states
 
-                    rewards = self.alg.discriminator.predict_amp_reward(
-                        amp_obs, next_amp_obs_with_term, rewards, normalizer=self.alg.amp_normalizer)[0]
+                    rewards, amp_reward, task_reward, _ = (
+                        self.alg.discriminator.predict_amp_reward(
+                            amp_obs,
+                            next_amp_obs_with_term,
+                            rewards,
+                            normalizer=self.alg.amp_normalizer,
+                        )
+                    )
                     amp_obs = torch.clone(next_amp_obs)
                     
                     self.alg.process_env_step(rewards,costs,dones, infos, next_amp_obs_with_term)
@@ -172,11 +182,17 @@ class AMPOnConstraintPolicyRunner:
                         # Book keeping
                         if 'episode' in infos:
                             ep_infos.append(infos['episode'])
+                        cur_task_reward_sum += task_reward
+                        cur_amp_reward_sum += amp_reward
                         cur_reward_sum += rewards
                         cur_episode_length += 1
                         new_ids = (dones > 0).nonzero(as_tuple=False)
-                        rewbuffer.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
+                        task_rewbuffer.extend(cur_task_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
+                        amp_rewbuffer.extend(cur_amp_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
+                        total_rewbuffer.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
                         lenbuffer.extend(cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
+                        cur_task_reward_sum[new_ids] = 0
+                        cur_amp_reward_sum[new_ids] = 0
                         cur_reward_sum[new_ids] = 0
                         cur_episode_length[new_ids] = 0
 
@@ -242,19 +258,23 @@ class AMPOnConstraintPolicyRunner:
 
         self.writer.add_scalar('Data/obs_max', locs['obs_batch_max'], locs['it'])
         self.writer.add_scalar('Data/obs_min', locs['obs_batch_min'], locs['it'])
-        if len(locs['rewbuffer']) > 0:
-            self.writer.add_scalar('Train/mean_reward', statistics.mean(locs['rewbuffer']), locs['it'])
+        if len(locs['task_rewbuffer']) > 0:
+            self.writer.add_scalar('Train/mean_reward', statistics.mean(locs['task_rewbuffer']), locs['it'])
+            self.writer.add_scalar('Train/mean_amp_reward', statistics.mean(locs['amp_rewbuffer']), locs['it'])
+            self.writer.add_scalar('Train/mean_total_reward', statistics.mean(locs['total_rewbuffer']), locs['it'])
             self.writer.add_scalar('Train/mean_episode_length', statistics.mean(locs['lenbuffer']), locs['it'])
             f"""{'AMP loss:':>{pad}} {locs['mean_amp_loss']:.4f}\n"""
             f"""{'AMP grad pen loss:':>{pad}} {locs['mean_grad_pen_loss']:.4f}\n"""
             f"""{'AMP mean policy pred:':>{pad}} {locs['mean_policy_pred']:.4f}\n"""
             f"""{'AMP mean expert pred:':>{pad}} {locs['mean_expert_pred']:.4f}\n"""
-            self.writer.add_scalar('Train/mean_reward/time', statistics.mean(locs['rewbuffer']), self.tot_time)
+            self.writer.add_scalar('Train/mean_reward/time', statistics.mean(locs['task_rewbuffer']), self.tot_time)
+            self.writer.add_scalar('Train/mean_amp_reward/time', statistics.mean(locs['amp_rewbuffer']), self.tot_time)
+            self.writer.add_scalar('Train/mean_task_reward/time', statistics.mean(locs['task_rewbuffer']), self.tot_time)
             self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
 
         str = f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
 
-        if len(locs['rewbuffer']) > 0:
+        if len(locs['task_rewbuffer']) > 0:
             log_string = (f"""{'#' * width}\n"""
                           f"""{str.center(width, ' ')}\n\n"""
                           f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
@@ -268,7 +288,9 @@ class AMPOnConstraintPolicyRunner:
                           f"""{'AMP mean policy pred:':>{pad}} {locs['mean_policy_pred']:.4f}\n"""
                           f"""{'AMP mean expert pred:':>{pad}} {locs['mean_expert_pred']:.4f}\n"""
                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
-                          f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
+                          f"""{'Mean reward:':>{pad}} {statistics.mean(locs['task_rewbuffer']):.2f}\n"""
+                          f"""{'Mean amp reward:':>{pad}} {statistics.mean(locs['amp_rewbuffer']):.2f}\n"""
+                          f"""{'Mean total reward:':>{pad}} {statistics.mean(locs['total_rewbuffer']):.2f}\n"""
                           f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n""")
         else:
             log_string = (f"""{'#' * width}\n"""
