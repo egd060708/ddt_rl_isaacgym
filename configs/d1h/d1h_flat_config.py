@@ -437,7 +437,7 @@ class D1HFlatCfg( LeggedRobotCfg ):
         resampling_time = 5.  # time before command are changed[s]
         heading_command = False  # if true: compute ang vel command from heading error
         global_reference = False
-        zero_min_cmd = False
+        zero_min_cmd = True
         class ranges:
             lin_vel_x = [-1.0, 1.0]  # min max [m/s]
             lin_vel_y = [-1.0, 1.0]  # min max [m/s]
@@ -480,9 +480,10 @@ class D1HFlatCfg( LeggedRobotCfg ):
             collision_head = -5.0
             body_pos_to_feet_x = 0.5
             body_feet_distance_x = -0.2
-            body_feet_distance_y = -0.8
+            body_feet_distance_y = -1.0
             body_symmetry_y = 0.1
             body_symmetry_z = 0.3
+            action_smoothness = -0.05
         
         only_positive_rewards = False
         tracking_sigma = 0.25  # tracking reward = exp(-error^2/sigma)

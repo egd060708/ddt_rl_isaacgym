@@ -15,7 +15,7 @@ from algorithm.datasets.motion_loader import AMPLoader, motion_layout_from_legge
 import glob
 
 # 用户放置 d1h 动作数据后自动加载；若目录为空需先创建并放入 .txt
-MOTION_FILES_D1H = glob.glob("resources/d1h/datasets/all/*.txt")
+MOTION_FILES_D1H = glob.glob("resources/d1h/datasets/clear_data/*.txt")
 
 
 class D1HAMPFlat(D1HFlat):
@@ -346,7 +346,7 @@ class D1HAMPFlatCfgPPO(D1HFlatCfgPPO):
         resume = False
         resume_path = ""
 
-        amp_reward_coef = 0.05
+        amp_reward_coef = 0.005
         amp_motion_files = MOTION_FILES_D1H
         amp_num_preload_transitions = 200000
         amp_task_reward_lerp = 0.5

@@ -81,6 +81,7 @@ class TitaFlatCfg( LeggedRobotCfg ):
         resampling_time = 10.  # time before command are changed[s]
         heading_command = False  # if true: compute ang vel command from heading error
         global_reference = False
+        zero_min_cmd = True
 
         class ranges:
             lin_vel_x = [-1.0, 1.0]  # min max [m/s]
