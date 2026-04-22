@@ -17,8 +17,10 @@ from algorithm.datasets import motion_util
 _DEFAULT_MOTION_LAYOUT = dict(
     pos_size=3,
     rot_size=4,
+    project_gravity_size=0,
     joint_pos_size=16,
     joint_vel_size=16,
+    joint_tau_size=0,
     tar_toe_pos_local_size=12,
     tar_toe_vel_local_size=12,
     linear_vel_size=3,
@@ -40,8 +42,10 @@ def motion_layout_from_legged_cfg(legged_cfg):
     for k in (
         "pos_size",
         "rot_size",
+        "project_gravity_size",
         "joint_pos_size",
         "joint_vel_size",
+        "joint_tau_size",
         "tar_toe_pos_local_size",
         "tar_toe_vel_local_size",
         "linear_vel_size",
@@ -68,9 +72,9 @@ class AMPLoader:
         motion_layout=None,
     ):
         """
-        motion_layout: dict，可包含 joint_pos_size, joint_vel_size, tar_toe_pos_local_size,
-        tar_toe_vel_local_size, linear_vel_size, angular_vel_size,
-        amp_feed_forward_style ('d1_without_wheel_pos' | 'd1h_without_wheel_pos' | 'contiguous'),
+        motion_layout: dict，可包含 joint_pos_size, joint_vel_size, joint_tau_size, tar_toe_pos_local_size,
+        tar_toe_vel_local_size, linear_vel_size, angular_vel_size, project_gravity_size,
+        amp_feed_forward_style ('d1_without_wheel_pos' | 'd1h_without_wheel_pos' | 'd1h_pg_without_wheel_pos' | 'contiguous'),
         amp_observation_dim (可选，显式指定与 env.get_amp_observations 一致的维度)。
         """
         if motion_files is None:
@@ -102,12 +106,6 @@ class AMPLoader:
                 motion_json = json.load(f)
                 motion_data = np.array(motion_json["Frames"])
 
-                if motion_data.shape[1] < self.joint_vel_end_idx:
-                    raise ValueError(
-                        f"{motion_file}: 每帧长度 {motion_data.shape[1]} < 期望 {self.joint_vel_end_idx} "
-                        f"(请检查 amp_motion_layout 与数据集格式是否一致)"
-                    )
-
                 for f_i in range(motion_data.shape[0]):
                     root_rot = self.get_root_rot(motion_data[f_i])
                     root_rot = pose3d.QuaternionNormalize(root_rot)
@@ -119,14 +117,14 @@ class AMPLoader:
 
                 self.trajectories.append(
                     torch.tensor(
-                        motion_data[:, self.root_rot_end_idx : self.joint_vel_end_idx],
+                        motion_data[:, self.root_rot_end_idx : self.joint_tau_end_idx],
                         dtype=torch.float32,
                         device=device,
                     )
                 )
                 self.trajectories_full.append(
                     torch.tensor(
-                        motion_data[:, : self.joint_vel_end_idx],
+                        motion_data[:, : self.joint_tau_end_idx],
                         dtype=torch.float32,
                         device=device,
                     )
@@ -170,6 +168,8 @@ class AMPLoader:
         self.tar_toe_vel_local_size = int(layout["tar_toe_vel_local_size"])
         self.linear_vel_size = int(layout["linear_vel_size"])
         self.angular_vel_size = int(layout["angular_vel_size"])
+        self.project_gravity_size = int(layout.get("project_gravity_size", 0))
+        self.joint_tau_size = int(layout.get("joint_tau_size", 0))
         self.amp_feed_forward_style = layout["amp_feed_forward_style"]
         self._amp_observation_dim_override = layout.get("amp_observation_dim")
 
@@ -177,7 +177,9 @@ class AMPLoader:
         self.root_pos_end_idx = self.root_pos_start_idx + self.pos_size
         self.root_rot_start_idx = self.root_pos_end_idx
         self.root_rot_end_idx = self.root_rot_start_idx + self.rot_size
-        self.joint_pose_start_idx = self.root_rot_end_idx
+        self.project_gravity_start_idx = self.root_rot_end_idx
+        self.project_gravity_end_idx = self.project_gravity_start_idx + self.project_gravity_size
+        self.joint_pose_start_idx = self.project_gravity_end_idx
         self.joint_pose_end_idx = self.joint_pose_start_idx + self.joint_pos_size
         self.tar_toe_pos_local_start_idx = self.joint_pose_end_idx
         self.tar_toe_pos_local_end_idx = (
@@ -189,11 +191,14 @@ class AMPLoader:
         self.angular_vel_end_idx = self.angular_vel_start_idx + self.angular_vel_size
         self.joint_vel_start_idx = self.angular_vel_end_idx
         self.joint_vel_end_idx = self.joint_vel_start_idx + self.joint_vel_size
-        self.tar_toe_vel_local_start_idx = self.joint_vel_end_idx
+        self.joint_tau_start_idx = self.joint_vel_end_idx
+        self.joint_tau_end_idx = self.joint_tau_start_idx + self.joint_tau_size
+        self.tar_toe_vel_local_start_idx = self.joint_tau_end_idx
         self.tar_toe_vel_local_end_idx = (
             self.tar_toe_vel_local_start_idx + self.tar_toe_vel_local_size
         )
-        # full frame 用于 trajectories_full 时截断到 joint_vel_end_idx（不含 tar_toe_vel）
+        
+        # full frame 用于 trajectories_full 时截断到 project_gravity_end_idx 或 joint_vel_end_idx
 
     def reorder_from_pybullet_to_isaac(self, motion_data):
         """仅适用于四足 16 关节 ×4 腿划分；其它布局请勿调用。"""
@@ -309,7 +314,7 @@ class AMPLoader:
         idx_low, idx_high = np.floor(p * n).astype(np.int), np.ceil(p * n).astype(
             np.int
         )
-        amp_seg_len = self.joint_vel_end_idx - self.joint_pose_start_idx
+        amp_seg_len = self.joint_tau_end_idx - self.project_gravity_start_idx
         all_frame_pos_starts = torch.zeros(
             len(traj_idxs), self.pos_size, device=self.device
         )
@@ -340,10 +345,10 @@ class AMPLoader:
                 trajectory[idx_high[traj_mask]]
             )
             all_frame_amp_starts[traj_mask] = trajectory[idx_low[traj_mask]][
-                :, self.joint_pose_start_idx : self.joint_vel_end_idx
+                :, self.project_gravity_start_idx : self.joint_tau_end_idx
             ]
             all_frame_amp_ends[traj_mask] = trajectory[idx_high[traj_mask]][
-                :, self.joint_pose_start_idx : self.joint_vel_end_idx
+                :, self.project_gravity_start_idx : self.joint_tau_end_idx
             ]
         blend = torch.tensor(p * n - idx_low, device=self.device, dtype=torch.float32).unsqueeze(
             -1
@@ -377,6 +382,8 @@ class AMPLoader:
     def blend_frame_pose(self, frame0, frame1, blend):
         root_pos0, root_pos1 = self.get_root_pos(frame0), self.get_root_pos(frame1)
         root_rot0, root_rot1 = self.get_root_rot(frame0), self.get_root_rot(frame1)
+        if self.project_gravity_size > 0:
+            pg0, pg1 = self.get_project_gravity(frame0), self.get_project_gravity(frame1)
         joints0, joints1 = self.get_joint_pose(frame0), self.get_joint_pose(frame1)
         tar_toe_pos_0, tar_toe_pos_1 = (
             self.get_tar_toe_pos_local(frame0),
@@ -391,11 +398,15 @@ class AMPLoader:
             self.get_angular_vel(frame1),
         )
         joint_vel_0, joint_vel_1 = self.get_joint_vel(frame0), self.get_joint_vel(frame1)
+        if self.joint_tau_size > 0:
+            joint_tau_0, joint_tau_1 = self.get_joint_tau(frame0), self.get_joint_tau(frame1)
 
         blend_root_pos = self.slerp(root_pos0, root_pos1, blend)
         blend_root_rot = transformations.quaternion_slerp(
             root_rot0.cpu().numpy(), root_rot1.cpu().numpy(), blend
         )
+        if self.project_gravity_size > 0:
+            blend_pg = self.slerp(pg0, pg1, blend)
         blend_root_rot = torch.tensor(
             motion_util.standardize_quaternion(blend_root_rot),
             dtype=torch.float32,
@@ -406,18 +417,18 @@ class AMPLoader:
         blend_linear_vel = self.slerp(linear_vel_0, linear_vel_1, blend)
         blend_angular_vel = self.slerp(angular_vel_0, angular_vel_1, blend)
         blend_joints_vel = self.slerp(joint_vel_0, joint_vel_1, blend)
+        blend_joint_tau = self.slerp(joint_tau_0, joint_tau_1, blend) if self.joint_tau_size > 0 else None
+        
+        blended = torch.cat([
+            blend_root_pos,
+            blend_root_rot])
+        if self.project_gravity_size > 0:
+            blended = torch.cat([blended, blend_pg])
+        blended = torch.cat([blended, blend_joints, blend_tar_toe_pos, blend_linear_vel, blend_angular_vel, blend_joints_vel])
+        if self.joint_tau_size > 0:
+            blended = torch.cat([blended, blend_joint_tau])
 
-        return torch.cat(
-            [
-                blend_root_pos,
-                blend_root_rot,
-                blend_joints,
-                blend_tar_toe_pos,
-                blend_linear_vel,
-                blend_angular_vel,
-                blend_joints_vel,
-            ]
-        )
+        return blended
 
     def _expert_features_from_full_frames(self, preloaded, idxs):
         """从完整帧张量构造与判别器一致的专家特征 (B, observation_dim)。idxs: np.ndarray 或 torch.LongTensor。"""
@@ -460,9 +471,86 @@ class AMPLoader:
                 ],
                 dim=1,
             )
+        elif self.amp_feed_forward_style == "d1h_without_wheel_angVel":
+            if self.joint_pos_size != 8:
+                raise ValueError(
+                    "d1h_without_wheel_angVel 需要 joint_pos_size=8"
+                )
+            jp = self.joint_pose_start_idx
+            jv = self.joint_vel_start_idx
+            body = torch.cat(
+                [
+                    preloaded[idxs_t, jp : jp + 3],
+                    preloaded[idxs_t, jp + 4 : jp + 7],
+                    preloaded[idxs_t, jp + 8 : self.joint_pose_end_idx],
+                    preloaded[idxs_t, self.joint_pose_end_idx : self.linear_vel_end_idx],
+                    preloaded[idxs_t, jv : jv + 3],
+                    preloaded[idxs_t, jv + 4 : jv + 7],
+                ],
+                dim=1,
+            )
+        elif self.amp_feed_forward_style == "d1h_without_wheelpos_angVel":
+            if self.joint_pos_size != 8:
+                raise ValueError(
+                    "d1h_without_wheelpos_angVel 需要 joint_pos_size=8"
+                )
+            jp = self.joint_pose_start_idx
+            jv = self.joint_vel_start_idx
+            body = torch.cat(
+                [
+                    preloaded[idxs_t, jp : jp + 3],
+                    preloaded[idxs_t, jp + 4 : jp + 7],
+                    preloaded[idxs_t, jp + 8 : self.joint_pose_end_idx],
+                    preloaded[idxs_t, self.joint_pose_end_idx : self.linear_vel_end_idx],
+                    preloaded[idxs_t, self.joint_vel_start_idx : self.joint_vel_end_idx],
+                ],
+                dim=1,
+            )
+        elif self.amp_feed_forward_style == "d1h_pg_without_wheel_pos":
+            # 新风格：包含 project_gravity (3维)，去掉 wheel/foot 相关，适用于 height35_pg 数据集
+            # 专家特征： joint_pos(部分) + linear_vel + angular_vel + project_gravity + joint_vel + root_z
+            if self.joint_pos_size != 8 or self.project_gravity_size != 3:
+                raise ValueError(
+                    "d1h_pg_without_wheel_pos 需要 joint_pos_size=8 和 project_gravity_size=3"
+                )
+            jp = self.joint_pose_start_idx
+            body = torch.cat(
+                [
+                    preloaded[idxs_t, jp : jp + 3],  # 部分 joint pos (hip/thigh 等)
+                    preloaded[idxs_t, jp + 4 : jp + 7],
+                    preloaded[idxs_t, jp + 8 : self.joint_pose_end_idx],
+                    preloaded[idxs_t, self.project_gravity_start_idx : self.project_gravity_end_idx],  # project_gravity
+                    preloaded[idxs_t, self.joint_pose_end_idx : self.joint_vel_end_idx],
+                ],
+                dim=1,
+            )
+        elif self.amp_feed_forward_style == "d1h_pg_without_wheel_foot_pos":
+            jp = self.joint_pose_start_idx
+            body = torch.cat(
+                [
+                    preloaded[idxs_t, jp : jp + 3],  # 部分 joint pos (hip/thigh 等)
+                    preloaded[idxs_t, jp + 4 : jp + 7],
+                    preloaded[idxs_t, jp + 8 : self.joint_pose_end_idx],
+                    preloaded[idxs_t, self.project_gravity_start_idx : self.project_gravity_end_idx],  # project_gravity
+                    preloaded[idxs_t, self.linear_vel_start_idx : self.joint_vel_end_idx],
+                ],
+                dim=1,
+            )
+        elif self.amp_feed_forward_style == "d1h_pg_tau_without_wheel_pos":
+            jp = self.joint_pose_start_idx
+            body = torch.cat(
+                [
+                    preloaded[idxs_t, jp : jp + 3],  # 部分 joint pos (hip/thigh 等)
+                    preloaded[idxs_t, jp + 4 : jp + 7],
+                    preloaded[idxs_t, jp + 8 : self.joint_pose_end_idx],
+                    preloaded[idxs_t, self.project_gravity_start_idx : self.project_gravity_end_idx],  # project_gravity
+                    preloaded[idxs_t, self.joint_pose_end_idx : self.joint_tau_end_idx],
+                ],
+                dim=1,
+            )
         else:
             body = preloaded[
-                idxs_t, self.joint_pose_start_idx : self.joint_vel_end_idx
+                idxs_t, self.project_gravity_start_idx : self.joint_tau_end_idx
             ]
         return torch.cat([body, root_z], dim=-1)
 
@@ -508,6 +596,21 @@ class AMPLoader:
             return traj_w + 1 - 4
         elif self.amp_feed_forward_style == "d1h_without_wheel_pos":
             return traj_w + 1 - 2
+        elif self.amp_feed_forward_style == "d1h_without_wheel_angVel":
+            return traj_w + 1 - 4 - 3
+        elif self.amp_feed_forward_style == "d1h_without_wheelpos_angVel":
+            return traj_w + 1 - 2 - 3
+        elif self.amp_feed_forward_style == "d1h_pg_without_wheel_pos":
+            # 对于 d1h_pg_without_wheel_pos 风格，traj_w 包含了 project_gravity (3维)，
+            # expert_features 包含 root_z 和选择的观测，推荐在 cfg.env.amp_motion_layout 中显式设置 amp_observation_dim
+            if self._amp_observation_dim_override is not None:
+                return int(self._amp_observation_dim_override)
+            # 保守计算：假设与 d1h_without_wheel_pos 类似 (去除 ~4 维 wheel/foot 相关)
+            return traj_w + 1 - 2
+        elif self.amp_feed_forward_style == "d1h_pg_without_wheel_foot_pos":
+            return traj_w + 1 - 2 - 6
+        elif self.amp_feed_forward_style == "d1h_pg_tau_without_wheel_pos":
+            return traj_w + 1 - 2
         return traj_w + 1
 
     @property
@@ -525,6 +628,12 @@ class AMPLoader:
 
     def get_root_rot_batch(self, poses):
         return poses[:, self.root_rot_start_idx : self.root_rot_end_idx]
+
+    def get_project_gravity(self, poses):
+        return poses[self.project_gravity_start_idx : self.project_gravity_end_idx]
+
+    def get_project_gravity_batch(self, poses):
+        return poses[:, self.project_gravity_start_idx : self.project_gravity_end_idx]
 
     def get_joint_pose(self, pose):
         return pose[self.joint_pose_start_idx : self.joint_pose_end_idx]
@@ -569,3 +678,9 @@ class AMPLoader:
         return poses[
             :, self.tar_toe_vel_local_start_idx : self.tar_toe_vel_local_end_idx
         ]
+        
+    def get_joint_tau(self, pose):
+        return pose[self.joint_tau_start_idx : self.joint_tau_end_idx]
+
+    def get_joint_tau_batch(self, poses):
+        return poses[:, self.joint_tau_start_idx : self.joint_tau_end_idx]

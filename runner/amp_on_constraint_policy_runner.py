@@ -67,7 +67,8 @@ class AMPOnConstraintPolicyRunner:
             amp_data.observation_dim * 2,
             train_cfg['runner']['amp_reward_coef'],
             train_cfg['runner']['amp_discr_hidden_dims'], device,
-            train_cfg['runner']['amp_task_reward_lerp']).to(self.device)
+            train_cfg['runner']['amp_task_reward_lerp'],
+            train_cfg['runner']['amp_reward_scale']).to(self.device)
 
         self.alg_cfg['k_value'] = self.env.cost_k_values
         alg_class = eval(self.cfg["algorithm_class_name"]) # PPO

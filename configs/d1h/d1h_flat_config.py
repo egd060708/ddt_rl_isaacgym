@@ -285,7 +285,7 @@ class D1HFlat(LeggedRobot):
         # Tracking of linear velocity commands (x axis)
         base_height_sigma = torch.clamp(self._get_base_heights()/self.cfg.rewards.base_height_target, 0, 1) + 0.2
         lin_vel_x_error = torch.clamp(torch.square(self.commands[:, 0] - self.base_lin_vel[:, 0]), 0, 1)
-        tracking_sigma = self.cfg.rewards.tracking_sigma * (0.1+torch.abs(self.commands[:, 0]))/(0.25+torch.abs(self.commands[:, 0]))
+        tracking_sigma = self.cfg.rewards.tracking_sigma * (0.1+torch.abs(self.commands[:, 0]))/(self.cfg.rewards.tracking_sigma+torch.abs(self.commands[:, 0]))
         reward = torch.clamp(-self.projected_gravity[:,2],0,1)*torch.exp(-lin_vel_x_error/tracking_sigma)*base_height_sigma
         return reward
     
@@ -293,7 +293,7 @@ class D1HFlat(LeggedRobot):
         # Tracking of linear velocity commands (y axis)
         base_height_sigma = torch.clamp(self._get_base_heights()/self.cfg.rewards.base_height_target, 0, 1) + 0.2
         lin_vel_y_error = torch.clamp(torch.square(self.commands[:, 1] - self.base_lin_vel[:, 1]), 0, 1)
-        tracking_sigma = self.cfg.rewards.tracking_sigma * (0.1+torch.abs(self.commands[:, 1]))/(0.25+torch.abs(self.commands[:, 1]))
+        tracking_sigma = self.cfg.rewards.tracking_sigma * (0.1+torch.abs(self.commands[:, 1]))/(self.cfg.rewards.tracking_sigma+torch.abs(self.commands[:, 1]))
         reward = torch.clamp(-self.projected_gravity[:,2],0,1)*torch.exp(-lin_vel_y_error/tracking_sigma)*base_height_sigma
         return reward
 
@@ -301,7 +301,7 @@ class D1HFlat(LeggedRobot):
         # Tracking of angular velocity commands (yaw)
         base_height_sigma = torch.clamp(self._get_base_heights()/self.cfg.rewards.base_height_target, 0, 1) + 0.2
         ang_vel_error = torch.square(self.commands[:, 2] - self.base_ang_vel[:, 2])
-        tracking_sigma = self.cfg.rewards.tracking_sigma * (0.1+torch.abs(self.commands[:, 2]))/(0.25+torch.abs(self.commands[:, 2]))
+        tracking_sigma = self.cfg.rewards.tracking_sigma_ang_vel * (0.1+torch.abs(self.commands[:, 2]))/(self.cfg.rewards.tracking_sigma_ang_vel+torch.abs(self.commands[:, 2]))
         return torch.clamp(-self.projected_gravity[:,2],0,1)*torch.exp(-ang_vel_error/tracking_sigma)*base_height_sigma
     
     def _reward_feet_air_time(self):
@@ -333,6 +333,30 @@ class D1HFlat(LeggedRobot):
         
         distance_x = torch.abs(torch.mean(base_derivation_xyz[:,:,0], dim=1))
         reward = torch.exp(-distance_x / self.cfg.rewards.distance_sigma)
+        return reward
+    
+    def _reward_body_pos_to_feet_y(self):
+        # keep body relative position to Los small
+        base_derivation = self.feet_pos - self.root_states[:, 0:3].unsqueeze(1)
+        base_derivation_xyz = torch.zeros_like(base_derivation[:,:,:])
+        
+        for i in range(base_derivation.shape[1]):
+            base_derivation_xyz[:, i, :] = quat_rotate_inverse(self.base_quat, base_derivation[:, i, :])
+        
+        distance_y = torch.abs(torch.abs(base_derivation_xyz[:,:,1]) - self.cfg.init_state.desired_feet_y)
+        reward = torch.sum(torch.exp(-distance_y / self.cfg.rewards.distance_sigma),dim=1)
+        return reward
+    
+    def _reward_body_pos_to_feet_y1(self):
+        # keep body relative position to Los small
+        base_derivation = self.feet_pos - self.root_states[:, 0:3].unsqueeze(1)
+        base_derivation_xyz = torch.zeros_like(base_derivation[:,:,:])
+        
+        for i in range(base_derivation.shape[1]):
+            base_derivation_xyz[:, i, :] = quat_rotate_inverse(self.base_quat, base_derivation[:, i, :])
+        
+        distance_y = (self.cfg.init_state.desired_feet_y - torch.abs(base_derivation_xyz[:,:,1])).clip(min=0.)
+        reward = torch.sum(torch.exp(-distance_y / self.cfg.rewards.distance_sigma),dim=1)
         return reward
 
     def _reward_body_feet_distance_x(self):
@@ -406,7 +430,8 @@ class D1HFlatCfg( LeggedRobotCfg ):
             'FL_foot_joint': 0,
             'FR_foot_joint': 0,
         }
-        desired_feet_distance = 0.4
+        desired_feet_distance = 0.46
+        desired_feet_y = 0.23
 
     class control( LeggedRobotCfg.control ):
         # PD Drive parameters:
@@ -427,7 +452,7 @@ class D1HFlatCfg( LeggedRobotCfg ):
         use_filter = True
 
     class commands( LeggedRobotCfg.commands ):
-        curriculum = True 
+        curriculum = False 
         max_curriculum = 1.0
         max_curriculum_x = 2.0
         max_curriculum_x_back = 1.0
@@ -440,7 +465,7 @@ class D1HFlatCfg( LeggedRobotCfg ):
         zero_min_cmd = True
         class ranges:
             lin_vel_x = [-1.0, 1.0]  # min max [m/s]
-            lin_vel_y = [-1.0, 1.0]  # min max [m/s]
+            lin_vel_y = [-0.0, 0.0]  # min max [m/s]
             ang_vel_yaw = [-1.0, 1.0]  # min max [rad/s]
             heading = [-3.14, 3.14]
 
@@ -448,7 +473,7 @@ class D1HFlatCfg( LeggedRobotCfg ):
         file = '{ROOT_DIR}/resources/d1h/urdf/robot.urdf'
         foot_name = "foot"
         name = "d1h"
-        penalize_contacts_on = ["thigh", "calf"]
+        penalize_contacts_on = ["thigh", "calf", "base"]
         penalize_contact_head_on = ["base"]
         terminate_after_contacts_on = []
         self_collisions = 0 # 1 to disable, 0 to enable...bitwise filter
@@ -460,38 +485,46 @@ class D1HFlatCfg( LeggedRobotCfg ):
             torques = 0.0
             powers = -2e-5
             termination = -100.0
-            tracking_lin_vel_x = 15.0
+            tracking_lin_vel = 0.0
+            tracking_lin_vel_x = 15
             tracking_lin_vel_y = 10.0
-            tracking_ang_vel = 8.0
+            tracking_ang_vel = 8
             lin_vel_z = -1.0
             orientation = -10.0
             ang_vel_xy = -0.05
-            dof_thigh_vel = -0.05
+            # dof_thigh_vel = -0.05
             dof_acc = -2.5e-7
             base_height = -10.0
-            feet_air_time = 10.0
-            collision = -2.0
+            # feet_air_time = 10.0
+            # collision = -2.0
             feet_stumble = 0.0
             action_rate = -0.01
             upward = 2.0
-            keep_still = -0.5
-             
+            # keep_still = -0.5
+            
             # finetune
-            collision_head = -5.0
-            body_pos_to_feet_x = 0.5
-            body_feet_distance_x = -0.2
+            # collision_head = -5.0
+            collision = -10.0
+            # body_pos_to_feet_x = 0.5
+            # body_pos_to_feet_y = 1.0
+            # body_pos_to_feet_y1 = 1.0
+            body_feet_distance_x = -0.5
             body_feet_distance_y = -1.0
-            body_symmetry_y = 0.1
-            body_symmetry_z = 0.3
-            action_smoothness = -0.05
+            # body_pos_to_feet_x = 1.0
+            # body_feet_distance_x = -2.0
+            # body_feet_distance_y = -5.0
+            # body_symmetry_y = 0.1
+            # body_symmetry_z = 0.3
+            # action_smoothness = -0.005
         
         only_positive_rewards = False
         tracking_sigma = 0.25  # tracking reward = exp(-error^2/sigma)
+        tracking_sigma_ang_vel = 0.25
         distance_sigma = 0.1  # distance reward = exp(-distance^2/sigma)
         soft_dof_pos_limit = 0.9  # percentage of urdf limits, values above this limit are penalized
         soft_dof_vel_limit = 0.9
         soft_torque_limit = 0.9
-        base_height_target = 0.45
+        base_height_target = 0.35
         max_contact_force = 500.  # forces above this value are penalized
     class costs(LeggedRobotCfg.costs):
         num_costs = 3

@@ -348,9 +348,9 @@ class LeggedRobot(BaseTask):
             #self.base_ang_vel  * self.obs_scales.ang_vel,
             # self.base_lin_vel * self.obs_scales.lin_vel,
             self.mass_params_tensor,                            # 随机化的质量参数（躯干质量分布） *4
-            self.friction_coeffs_tensor,                        # 随机化的地面摩擦系数           *1    
+            self.friction_coeffs_tensor,                        # 随机化的地面摩擦系数           *1 
             self.restitution_coeffs_tensor,                     # 随机化的碰撞恢复系数           *1
-            self.motor_strength,                                # 电机强度比例因子               *16   
+            self.motor_strength,                                # 电机强度比例因子               *16
             self.kp_factor,                                     # 位置环比例系数因子             *16
             self.kd_factor), dim=-1)                            # 微分环系数因子                *16
         
@@ -379,7 +379,7 @@ class LeggedRobot(BaseTask):
                 self.contact_filt.float().unsqueeze(1)
             ], dim=1)
         )
-
+        
         if self.cfg.terrain.include_act_obs_pair_buf:
             # add to full observation history and action history to obs
             pure_obs_hist = self.obs_history_buf[:,:,:-self.num_actions].reshape(self.num_envs,-1)

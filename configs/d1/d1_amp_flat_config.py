@@ -68,10 +68,11 @@ class D1AMPFlat(D1Flat):
         foot_pos, foot_vel = self._get_feet_local_pos_vel()
         base_lin_vel = self.base_lin_vel
         base_ang_vel = self.base_ang_vel
-        joint_vel = self.dof_vel
+        joint_vel = self.dof_vel[:,self.foot_joint_mask]
         # joint_vel = self.dof_vel[:,self.foot_joint_mask]
         z_pos = self.root_states[:, 2:3]
-        return torch.cat((joint_pos, foot_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos), dim=-1)
+        # return torch.cat((joint_pos, foot_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos), dim=-1)
+        return torch.cat((joint_pos, foot_pos, base_lin_vel, joint_vel, z_pos), dim=-1)
 
     def _reset_dofs_amp(self, env_ids, frames):
         """ Resets DOF position and velocities of selected environmments

@@ -1,9 +1,10 @@
 """
-d1h 双足 AMP 配置：8 关节 + 6 维足端（2×3）数据集布局。
+d1h 双足 AMP 配置：支持 height35_pg 数据集（四元数后新增 3 维 project_gravity）。
 
-请将动作数据 JSON 放在 resources/d1h/datasets/all/*.txt，
-每帧长度 = 3+4+8+6+3+3+8+6 = 41（与 amp_motion_layout 一致）。
-AMP 观测与专家特征：关节(8)+足端位姿局部(6)+基座线/角速度(3+3)+关节速度(8)+z(1) = 29。
+请将动作数据 JSON 放在 resources/d1h/datasets/height35_pg/*.txt，
+每帧长度 = 3+4+8+6+3+3+3+8+6 = 44（pos+rot+joint_pos+tar_toe_pos+lin_vel+ang_vel+project_gravity+joint_vel+tar_toe_vel）。
+AMP 观测与专家特征：joint_pos(select)+lin_vel+ang_vel+project_gravity+joint_vel + root_z。
+使用 amp_feed_forward_style = "d1h_pg_without_wheel_pos" 并设置 amp_observation_dim。
 """
 from isaacgym.torch_utils import *
 from isaacgym import gymtorch, gymapi, gymutil
@@ -15,7 +16,8 @@ from algorithm.datasets.motion_loader import AMPLoader, motion_layout_from_legge
 import glob
 
 # 用户放置 d1h 动作数据后自动加载；若目录为空需先创建并放入 .txt
-MOTION_FILES_D1H = glob.glob("resources/d1h/datasets/clear_data/*.txt")
+# 支持 height35_pg (带 project_gravity) 数据集
+MOTION_FILES_D1H = glob.glob("resources/d1h/datasets/height35_pg/*.txt")
 
 
 class D1HAMPFlat(D1HFlat):
@@ -52,6 +54,8 @@ class D1HAMPFlat(D1HFlat):
                 time_between_frames=self.dt,
                 motion_layout=_ml if _ml else None,
             )
+            
+        self.reset_idx(torch.arange(self.num_envs, device=self.device))
 
     def _get_feet_local_pos_vel(self):
         N = self.num_envs
@@ -79,17 +83,95 @@ class D1HAMPFlat(D1HFlat):
         )
 
     def get_amp_observations(self):
-        joint_pos = self.dof_pos[:,self.foot_joint_mask]
-        foot_pos, _foot_vel = self._get_feet_local_pos_vel()
-        base_lin_vel = self.base_lin_vel
-        base_ang_vel = self.base_ang_vel
-        joint_vel = self.dof_vel
-        # joint_vel = self.dof_vel[:,self.foot_joint_mask]
-        z_pos = self.root_states[:, 2:3]
-        return torch.cat(
-            (joint_pos, foot_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos),
-            dim=-1,
-        )
+        """支持 d1h_pg_without_wheel_pos 风格：将 projected_gravity 加入 AMP 观测，与数据集匹配。"""
+        style = self.cfg.env.amp_motion_layout.amp_feed_forward_style
+        if style == "d1h_pg_without_wheel_pos":
+            # 新数据集风格：使用 project_gravity 替换/补充 foot_pos 等，匹配 height35_pg 数据集
+            # 观测组成： joint_pos (mask 后) + base_lin_vel + base_ang_vel + projected_gravity + joint_vel + z
+            joint_pos = self.dof_pos[:, self.foot_joint_mask]
+            foot_pos, _foot_vel = self._get_feet_local_pos_vel()
+            base_lin_vel = self.base_lin_vel
+            base_ang_vel = self.base_ang_vel
+            proj_gravity = self.projected_gravity
+            joint_vel = self.dof_vel
+            z_pos = self.root_states[:, 2:3]
+            amp_obs = torch.cat(
+                (joint_pos, proj_gravity, foot_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos),
+                dim=-1,
+            )
+            return amp_obs
+        elif style == "d1h_pg_without_wheel_foot_pos":
+            joint_pos = self.dof_pos[:, self.foot_joint_mask]
+            foot_pos, _foot_vel = self._get_feet_local_pos_vel()
+            base_lin_vel = self.base_lin_vel
+            base_ang_vel = self.base_ang_vel
+            proj_gravity = self.projected_gravity
+            joint_vel = self.dof_vel
+            z_pos = self.root_states[:, 2:3]
+            amp_obs = torch.cat(
+                (joint_pos, proj_gravity, base_lin_vel, base_ang_vel, joint_vel, z_pos),
+                dim=-1,
+            )
+            return amp_obs
+        elif style == "d1h_without_wheel_pos":
+            joint_pos = self.dof_pos[:, self.foot_joint_mask]
+            foot_pos, _foot_vel = self._get_feet_local_pos_vel()
+            base_lin_vel = self.base_lin_vel
+            base_ang_vel = self.base_ang_vel
+            joint_vel = self.dof_vel
+            z_pos = self.root_states[:, 2:3]
+            return torch.cat(
+                (joint_pos, foot_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos),
+                dim=-1,
+            )
+        elif style == "d1h_without_wheel_angVel":
+            joint_pos = self.dof_pos[:, self.foot_joint_mask]
+            foot_pos, _foot_vel = self._get_feet_local_pos_vel()
+            base_lin_vel = self.base_lin_vel
+            base_ang_vel = self.base_ang_vel
+            joint_vel = self.dof_vel[:, self.foot_joint_mask]
+            z_pos = self.root_states[:, 2:3]
+            return torch.cat(
+                (joint_pos, foot_pos, base_lin_vel, joint_vel, z_pos),
+                dim=-1,
+            )
+        elif style == "d1h_without_wheelpos_angVel":
+            joint_pos = self.dof_pos[:, self.foot_joint_mask]
+            foot_pos, _foot_vel = self._get_feet_local_pos_vel()
+            base_lin_vel = self.base_lin_vel
+            base_ang_vel = self.base_ang_vel
+            joint_vel = self.dof_vel
+            z_pos = self.root_states[:, 2:3]
+            return torch.cat(
+                (joint_pos, foot_pos, base_lin_vel, joint_vel, z_pos),
+                dim=-1,
+            )
+        elif style == "d1h_pg_tau_without_wheel_pos":
+            joint_pos = self.dof_pos[:, self.foot_joint_mask]
+            foot_pos, _foot_vel = self._get_feet_local_pos_vel()
+            base_lin_vel = self.base_lin_vel
+            base_ang_vel = self.base_ang_vel
+            proj_gravity = self.projected_gravity
+            joint_vel = self.dof_vel
+            joint_tau = self.torques
+            z_pos = self.root_states[:, 2:3]
+            amp_obs = torch.cat(
+                (joint_pos, proj_gravity, foot_pos, base_lin_vel, base_ang_vel, joint_vel, joint_tau, z_pos),
+                dim=-1,
+            )
+            return amp_obs
+        else:
+            # 默认
+            joint_pos = self.dof_pos
+            foot_pos, _foot_vel = self._get_feet_local_pos_vel()
+            base_lin_vel = self.base_lin_vel
+            base_ang_vel = self.base_ang_vel
+            joint_vel = self.dof_vel
+            z_pos = self.root_states[:, 2:3]
+            return torch.cat(
+                (joint_pos, foot_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos),
+                dim=-1,
+            )
 
     def _reset_dofs_amp(self, env_ids, frames):
         self.dof_pos[env_ids] = self.amp_loader.get_joint_pose_batch(frames)
@@ -171,11 +253,18 @@ class D1HAMPFlat(D1HFlat):
 
     def reset(self):
         self.reset_idx(torch.arange(self.num_envs, device=self.device))
-        obs, _, _, _, _, _, _, _ = self.step(
-            torch.zeros(
-                self.num_envs, self.num_actions, device=self.device, requires_grad=False
+        if self.cfg.env.baseline_mode:
+            obs, _, _, _, _, _ = self.step(
+                torch.zeros(
+                    self.num_envs, self.num_actions, device=self.device, requires_grad=False
+                )
             )
-        )
+        else:
+            obs, _, _, _, _, _, _, _ = self.step(
+                torch.zeros(
+                    self.num_envs, self.num_actions, device=self.device, requires_grad=False
+                )
+            )
         return obs
 
     def step(self, actions):
@@ -207,16 +296,26 @@ class D1HAMPFlat(D1HFlat):
                 self.privileged_obs_buf, -clip_obs, clip_obs
             )
 
-        return (
-            self.obs_buf,
-            self.privileged_obs_buf,
-            self.rew_buf,
-            self.cost_buf,
-            self.reset_buf,
-            self.extras,
-            reset_env_ids,
-            terminal_amp_states,
-        )
+        if self.cfg.env.baseline_mode:
+            return (
+                self.obs_buf,
+                self.privileged_obs_buf,
+                self.rew_buf,
+                self.cost_buf,
+                self.reset_buf,
+                self.extras,
+            )
+        else:
+            return (
+                self.obs_buf,
+                self.privileged_obs_buf,
+                self.rew_buf,
+                self.cost_buf,
+                self.reset_buf,
+                self.extras,
+                reset_env_ids,
+                terminal_amp_states,
+            )
 
     def reset_idx(self, env_ids):
         if len(env_ids) == 0:
@@ -229,9 +328,32 @@ class D1HAMPFlat(D1HFlat):
             self._update_command_curriculum(env_ids)
 
         if self.cfg.env.reference_state_initialization:
-            frames = self.amp_loader.get_full_frame_batch(len(env_ids))
-            self._reset_dofs_amp(env_ids, frames)
-            self._reset_root_states_amp(env_ids, frames)
+            ref_init_prob = float(
+                getattr(self.cfg.env, "reference_state_initialization_prob", 1.0)
+            )
+            ref_init_prob = max(0.0, min(1.0, ref_init_prob))
+
+            if ref_init_prob >= 1.0:
+                amp_env_ids = env_ids
+                default_env_ids = env_ids[:0]
+            elif ref_init_prob <= 0.0:
+                amp_env_ids = env_ids[:0]
+                default_env_ids = env_ids
+            else:
+                amp_mask = (
+                    torch.rand(len(env_ids), device=self.device) < ref_init_prob
+                )
+                amp_env_ids = env_ids[amp_mask]
+                default_env_ids = env_ids[~amp_mask]
+
+            if len(amp_env_ids) > 0:
+                frames = self.amp_loader.get_full_frame_batch(len(amp_env_ids))
+                self._reset_dofs_amp(amp_env_ids, frames)
+                self._reset_root_states_amp(amp_env_ids, frames)
+
+            if len(default_env_ids) > 0:
+                self._reset_dofs(default_env_ids)
+                self._reset_root_states(default_env_ids)
         else:
             self._reset_dofs(env_ids)
             self._reset_root_states(env_ids)
@@ -277,25 +399,41 @@ class D1HAMPFlat(D1HFlat):
 
 class D1HAMPFlatCfg(D1HFlatCfg):
     class env(D1HFlatCfg.env):
-        reference_state_initialization = False
-        reference_state_initialization_prob = 0.85
+        reference_state_initialization = True
+        reference_state_initialization_prob = 1.0
         amp_motion_files = MOTION_FILES_D1H
+        baseline_mode = False
 
         class amp_motion_layout:
             pos_size = 3
             rot_size = 4
+            project_gravity_size = 3
             joint_pos_size = 8
             joint_vel_size = 8
+            joint_tau_size = 0
             tar_toe_pos_local_size = 6
             tar_toe_vel_local_size = 6
             linear_vel_size = 3
             angular_vel_size = 3
-            amp_feed_forward_style = "d1h_without_wheel_pos"
-            # 8+6+3+3+8+1；若修改 get_amp_observations 请同步改此值或置 None 用自动推算
+            amp_feed_forward_style = "d1h_pg_without_wheel_pos"
+            # 对于带 project_gravity 的新数据集，专家特征维度 = joint select(~8) + lin3 + ang3 + pg3 + jv8 + z1 ≈ 26
+            # 请根据实际 get_amp_observations 维度设置，或置 None 使用自动推算（推荐显式设置以避免不匹配）
             amp_observation_dim = None
+            
+    class asset( D1HFlatCfg.asset ):
+        file = '{ROOT_DIR}/resources/d1h/urdf/robot.urdf'
+        foot_name = "foot"
+        name = "d1h"
+        penalize_contacts_on = ["thigh", "calf", "base"]
+        penalize_contact_head_on = ["base"]
+        # terminate_after_contacts_on = ["thigh", "calf", "base"]
+        terminate_after_contacts_on = []
+        self_collisions = 0 # 1 to disable, 0 to enable...bitwise filter
+        replace_cylinder_with_capsule = False  # replace collision cylinders with capsules, leads to faster/more stable simulation
+        flip_visual_attachments = False
 
     class commands(D1HFlatCfg.commands):
-        curriculum = True
+        curriculum = False
         heading_command = False
 
 
@@ -325,15 +463,15 @@ class D1HAMPFlatCfg_Play(D1HAMPFlatCfg):
         heading_command = False  # if true: compute ang vel command from heading error
         resampling_time = 2.
         class ranges:
-            lin_vel_x = [-1., 1.]  # min max [m/s]
-            lin_vel_y = [-1., 1.]  # min max [m/s]
-            ang_vel_yaw = [-1, 1]  # min max [rad/s]
+            lin_vel_x = [0., 0.]  # min max [m/s]
+            lin_vel_y = [0., 0.]  # min max [m/s]
+            ang_vel_yaw = [0, 0]  # min max [rad/s]
             heading = [-3.14, 3.14]
 
 
 class D1HAMPFlatCfgPPO(D1HFlatCfgPPO):
     class algorithm(D1HFlatCfgPPO.algorithm):
-        amp_replay_buffer_size = 1000000
+        amp_replay_buffer_size = 3000000
 
     class runner(D1HFlatCfgPPO.runner):
         run_name = ""
@@ -346,10 +484,11 @@ class D1HAMPFlatCfgPPO(D1HFlatCfgPPO):
         resume = False
         resume_path = ""
 
-        amp_reward_coef = 0.005
+        amp_reward_coef = 0.5
         amp_motion_files = MOTION_FILES_D1H
-        amp_num_preload_transitions = 200000
+        amp_num_preload_transitions = 6000000
         amp_task_reward_lerp = 0.5
+        amp_reward_scale = 0.25
         amp_discr_hidden_dims = [1024, 512]
 
         # 8 个关节，与 d1h 每条腿 4 关节对应的两组系数重复一次

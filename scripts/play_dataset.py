@@ -15,6 +15,8 @@
     python scripts/play_dataset.py --task=d1_flat_play --dataset d1_stand_up.txt
     python scripts/play_dataset.py --task=d1h_flat_play --robot d1h --dataset my_motion.txt
     python scripts/play_dataset.py --task=d1_flat_play --dataset all/d1_stand_up.txt
+
+播放时默认将根位置在 z 方向抬高 0.1m（相对数据集），减轻与地面碰撞同时保留地面作参照；可用 --z_lift 修改。
 """
 
 import json
@@ -171,6 +173,9 @@ def play_dataset(args):
     print(f"  - 动作权重: {motion_weight}")
     print(f"  - 预计播放时长: {len(frames) * frame_duration:.2f}s")
 
+    z_lift = float(getattr(args, "z_lift", 0.1))
+    print(f"  - 根位置 z 播放偏移: +{z_lift} m（相对数据集，减轻与地面碰撞）")
+
     first_frame = frames[0]
     print(f"\n第一帧数据验证:")
     print(f"  - 每帧数据量: {len(first_frame)}")
@@ -278,6 +283,8 @@ def play_dataset(args):
             position, rotation, joint_positions = extract_pose_data(
                 frame, joint_pos_size
             )
+            position = position.copy()
+            position[2] += z_lift
 
             set_robot_pose(
                 env, 0, position, rotation, joint_positions, num_dof
@@ -361,6 +368,12 @@ def main():
     temp_parser.add_argument("--output", type=str, default=None)
     temp_parser.add_argument("--save_images", action="store_true")
     temp_parser.add_argument("--img_dir", type=str, default=None)
+    temp_parser.add_argument(
+        "--z_lift",
+        type=float,
+        default=0.1,
+        help="播放时根位置 z 方向额外抬高 [m]，默认 0.1；设为 0 则与数据集一致",
+    )
 
     temp_args, remaining_argv = temp_parser.parse_known_args()
     sys.argv = [sys.argv[0]] + remaining_argv
@@ -373,6 +386,7 @@ def main():
     args.output = temp_args.output
     args.save_images = temp_args.save_images
     args.img_dir = temp_args.img_dir
+    args.z_lift = temp_args.z_lift
 
     if not hasattr(args, "task") or args.task is None:
         args.task = "d1_flat_play"
