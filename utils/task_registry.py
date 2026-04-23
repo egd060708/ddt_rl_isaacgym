@@ -7,6 +7,7 @@ import numpy as np
 from envs.vec_env import VecEnv
 from runner import OnConstraintPolicyRunner
 from runner import AMPOnConstraintPolicyRunner
+from runner import WAMPOnConstraintPolicyRunner
 
 from global_config import ROOT_DIR, ENVS_DIR
 from .helpers import (

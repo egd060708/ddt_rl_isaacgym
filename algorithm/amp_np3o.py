@@ -316,7 +316,7 @@ class AMPNP3O:
                 if self.imi_flag:
                     imitation_loss = self.actor_critic.imitation_learning_loss(obs_batch,self.imi_weight)
 
-                    loss = main_loss + combine_value_loss + entropy_loss + imitation_loss
+                    loss = main_loss + combine_value_loss + entropy_loss + imitation_loss + amp_loss + grad_pen_loss
                 else:
                     loss = main_loss + combine_value_loss + entropy_loss + amp_loss + grad_pen_loss
 

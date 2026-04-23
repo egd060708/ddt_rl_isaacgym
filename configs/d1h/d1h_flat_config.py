@@ -252,6 +252,13 @@ class D1HFlat(LeggedRobot):
             else:
                 torques = self.kp_factor * self.p_gains*(joint_pos_target - self.dof_pos) - self.kd_factor * self.d_gains*self.dof_vel
                 torques[:,self.foot_joint_indices] = self.kp_factor[:,self.foot_joint_indices]  * self.p_gains[self.foot_joint_indices] * actions_scaled[:,self.foot_joint_indices] - self.kd_factor[:,self.foot_joint_indices] *self.d_gains[self.foot_joint_indices] * self.dof_vel[:,self.foot_joint_indices]
+        elif control_type == "T":
+            if not self.cfg.domain_rand.randomize_kpkd:  # TODO add strength to gain directly
+                torques = self.p_gains*(actions_scaled) - self.d_gains*self.dof_vel
+                torques[:,self.foot_joint_indices] = self.p_gains[self.foot_joint_indices] * actions_scaled[:,self.foot_joint_indices] - self.d_gains[self.foot_joint_indices] * self.dof_vel[:,self.foot_joint_indices]                
+            else:
+                torques = self.kp_factor * self.p_gains*(actions_scaled) - self.kd_factor * self.d_gains*self.dof_vel
+                torques[:,self.foot_joint_indices] = self.kp_factor[:,self.foot_joint_indices]  * self.p_gains[self.foot_joint_indices] * actions_scaled[:,self.foot_joint_indices] - self.kd_factor[:,self.foot_joint_indices] *self.d_gains[self.foot_joint_indices] * self.dof_vel[:,self.foot_joint_indices]
         else: 
             raise NameError(f"Unknown controller type: {control_type}")
         torques *= self.motor_strength

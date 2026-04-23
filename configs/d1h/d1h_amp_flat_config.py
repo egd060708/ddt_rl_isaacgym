@@ -1,10 +1,11 @@
 """
-d1h 双足 AMP 配置：支持 height35_pg 数据集（四元数后新增 3 维 project_gravity）。
+d1h 双足 AMP 配置：支持 height40_pg_tau 数据集（包含 project_gravity 和 joint_tau）。
 
-请将动作数据 JSON 放在 resources/d1h/datasets/height35_pg/*.txt，
-每帧长度 = 3+4+8+6+3+3+3+8+6 = 44（pos+rot+joint_pos+tar_toe_pos+lin_vel+ang_vel+project_gravity+joint_vel+tar_toe_vel）。
-AMP 观测与专家特征：joint_pos(select)+lin_vel+ang_vel+project_gravity+joint_vel + root_z。
-使用 amp_feed_forward_style = "d1h_pg_without_wheel_pos" 并设置 amp_observation_dim。
+请将动作数据 JSON 放在 resources/d1h/datasets/height40_pg_tau/*.txt，
+每帧长度 = 52（pos3+rot4+pg3+jpos8+tar_toe6+lin3+ang3+jvel8+jtau8+tar_vel6）。
+AMP 观测维度为 30（使用 d1h_pg_without_wheel_pos 风格：masked_joint_pos(6)+pg(3)+foot_pos(6)+lin(3)+ang(3)+jvel(8)+z(1)）。
+数据集读取全帧维度(52)与 AMP 使用的专家特征维度(30)不同，可通过 amp_observation_dim 显式指定。
+使用 amp_feed_forward_style = "d1h_pg_without_wheel_pos" 并设置 amp_observation_dim = 30。
 """
 from isaacgym.torch_utils import *
 from isaacgym import gymtorch, gymapi, gymutil
@@ -14,6 +15,8 @@ import torch
 from configs.d1h.d1h_flat_config import D1HFlat, D1HFlatCfg, D1HFlatCfgPPO
 from algorithm.datasets.motion_loader import AMPLoader, motion_layout_from_legged_cfg
 import glob
+from algorithm.wamp_discriminator import WAMPDiscriminator
+
 
 # 用户放置 d1h 动作数据后自动加载；若目录为空需先创建并放入 .txt
 # 支持 height35_pg (带 project_gravity) 数据集
@@ -83,18 +86,19 @@ class D1HAMPFlat(D1HFlat):
         )
 
     def get_amp_observations(self):
-        """支持 d1h_pg_without_wheel_pos 风格：将 projected_gravity 加入 AMP 观测，与数据集匹配。"""
+        """支持 d1h_pg_without_wheel_pos 风格：将 projected_gravity 加入 AMP 观测，与 height40_pg_tau 数据集匹配。
+        维度固定为 30：masked_joint_pos(6) + proj_gravity(3) + foot_pos(6) + lin_vel(3) + ang_vel(3) + joint_vel(8) + root_z(1)。
+        """
         style = self.cfg.env.amp_motion_layout.amp_feed_forward_style
         if style == "d1h_pg_without_wheel_pos":
-            # 新数据集风格：使用 project_gravity 替换/补充 foot_pos 等，匹配 height35_pg 数据集
-            # 观测组成： joint_pos (mask 后) + base_lin_vel + base_ang_vel + projected_gravity + joint_vel + z
-            joint_pos = self.dof_pos[:, self.foot_joint_mask]
-            foot_pos, _foot_vel = self._get_feet_local_pos_vel()
-            base_lin_vel = self.base_lin_vel
-            base_ang_vel = self.base_ang_vel
-            proj_gravity = self.projected_gravity
-            joint_vel = self.dof_vel
-            z_pos = self.root_states[:, 2:3]
+            # 观测组成匹配 motion_loader._expert_features_from_full_frames 中的提取逻辑
+            joint_pos = self.dof_pos[:, self.foot_joint_mask]  # 6 dims (排除 foot joints [3,7])
+            foot_pos, _foot_vel = self._get_feet_local_pos_vel()  # 6 dims (2 feet * 3)
+            base_lin_vel = self.base_lin_vel  # 3
+            base_ang_vel = self.base_ang_vel  # 3
+            proj_gravity = self.projected_gravity  # 3
+            joint_vel = self.dof_vel  # 8
+            z_pos = self.root_states[:, 2:3]  # 1
             amp_obs = torch.cat(
                 (joint_pos, proj_gravity, foot_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos),
                 dim=-1,
@@ -410,15 +414,15 @@ class D1HAMPFlatCfg(D1HFlatCfg):
             project_gravity_size = 3
             joint_pos_size = 8
             joint_vel_size = 8
-            joint_tau_size = 0
+            # joint_tau_size = 8
             tar_toe_pos_local_size = 6
             tar_toe_vel_local_size = 6
             linear_vel_size = 3
             angular_vel_size = 3
             amp_feed_forward_style = "d1h_pg_without_wheel_pos"
-            # 对于带 project_gravity 的新数据集，专家特征维度 = joint select(~8) + lin3 + ang3 + pg3 + jv8 + z1 ≈ 26
-            # 请根据实际 get_amp_observations 维度设置，或置 None 使用自动推算（推荐显式设置以避免不匹配）
-            amp_observation_dim = None
+            # 数据集读取维度(52)与 AMP 特征使用维度(30)不同，通过 amp_observation_dim 显式指定匹配 get_amp_observations 返回的维度
+            # 当前风格下专家特征维度为 30，可避免 normalize_torch 中的形状不匹配 (30 vs 38)
+            amp_observation_dim = 30
             
     class asset( D1HFlatCfg.asset ):
         file = '{ROOT_DIR}/resources/d1h/urdf/robot.urdf'
@@ -463,9 +467,9 @@ class D1HAMPFlatCfg_Play(D1HAMPFlatCfg):
         heading_command = False  # if true: compute ang vel command from heading error
         resampling_time = 2.
         class ranges:
-            lin_vel_x = [0., 0.]  # min max [m/s]
-            lin_vel_y = [0., 0.]  # min max [m/s]
-            ang_vel_yaw = [0, 0]  # min max [rad/s]
+            lin_vel_x = [-1., 1.]  # min max [m/s]
+            lin_vel_y = [-1., 1.]  # min max [m/s]
+            ang_vel_yaw = [-1, 1]  # min max [rad/s]
             heading = [-3.14, 3.14]
 
 
@@ -493,3 +497,95 @@ class D1HAMPFlatCfgPPO(D1HFlatCfgPPO):
 
         # 8 个关节，与 d1h 每条腿 4 关节对应的两组系数重复一次
         min_normalized_std = [0.05, 0.02, 0.05, 0.1] * 2
+
+
+class D1HWAMPFlat(D1HAMPFlat):
+    """Wasserstein Adversarial Imitation (WAMP) version for HumanMimic paper.
+    Uses WGAN-GP discriminator and WAMPNP3O.
+    """
+    def __init__(self, cfg, sim_params, physics_engine, sim_device, headless):
+        super().__init__(cfg, sim_params, physics_engine, sim_device, headless)
+        # Ensure amp_loader is initialized (WAMP uses the same motion loader)
+        # self._ensure_amp_loader()
+
+
+class D1HWAMPFlatCfg(D1HAMPFlatCfg):
+    class env(D1HAMPFlatCfg.env):
+        reference_state_initialization = True
+        reference_state_initialization_prob = 1.0
+        amp_motion_files = MOTION_FILES_D1H
+
+        class amp_motion_layout:
+            pos_size = 3
+            rot_size = 4
+            project_gravity_size = 3
+            joint_pos_size = 8
+            joint_vel_size = 8
+            # joint_tau_size = 8
+            tar_toe_pos_local_size = 6
+            tar_toe_vel_local_size = 6
+            linear_vel_size = 3
+            angular_vel_size = 3
+            amp_feed_forward_style = "d1h_pg_without_wheel_pos"
+            # 与 AMP 配置一致，显式设置维度 30 以匹配 env.get_amp_observations()
+            amp_observation_dim = 30
+
+
+class D1HWAMPFlatCfg_Play(D1HWAMPFlatCfg):
+    class env(D1HWAMPFlatCfg.env):
+        num_envs = 10
+
+    class terrain(D1HWAMPFlatCfg.terrain):
+        mesh_type = "plane"
+        curriculum = False
+
+    class noise(D1HWAMPFlatCfg.noise):
+        add_noise = False
+
+    class domain_rand(D1HWAMPFlatCfg.domain_rand):
+        push_robots = False
+        randomize_friction = False
+        randomize_base_com = False
+        randomize_base_mass = False
+        randomize_motor = False
+        randomize_lag_timesteps = False
+        randomize_restitution = False
+        disturbance = False
+        randomize_kpkd = False
+
+    class commands(D1HWAMPFlatCfg.commands):
+        heading_command = False
+        resampling_time = 2.0
+        class ranges:
+            lin_vel_x = [0.0, 0.0]
+            lin_vel_y = [0.0, 0.0]
+            ang_vel_yaw = [0, 0]
+            heading = [-3.14, 3.14]
+
+
+class D1HWAMPFlatCfgPPO(D1HAMPFlatCfgPPO):
+    class algorithm(D1HFlatCfgPPO.algorithm):
+        amp_replay_buffer_size = 3000000
+
+    class runner(D1HAMPFlatCfgPPO.runner):
+        run_name = ""
+        experiment_name = "d1h_wamp_flat"
+        policy_class_name = "ActorCriticBarlowTwins"
+        runner_class_name = "WAMPOnConstraintPolicyRunner"
+        algorithm_class_name = "WAMPNP3O"
+        max_iterations = 40000
+        num_steps_per_env = 24
+        resume = False
+        resume_path = ""
+
+        amp_reward_coef = 0.25
+        amp_motion_files = MOTION_FILES_D1H
+        amp_num_preload_transitions = 6000000
+        amp_task_reward_lerp = 0.5
+        amp_reward_scale = 0.25
+        wasserstein_lambda = 10.0
+        amp_discr_hidden_dims = [1024, 512]
+
+        min_normalized_std = [0.05, 0.02, 0.05, 0.1] * 2
+
+

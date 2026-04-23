@@ -11,7 +11,7 @@ from global_config import ROOT_DIR
 
 # from modules import ActorCriticRMA,ActorCriticRmaTrans,ActorCriticSF,ActorCriticBarlowTwins,ActorCriticStateTransformer,ActorCriticTransBarlowTwins,ActorCriticMixedBarlowTwins,ActorCriticRnnBarlowTwins,ActorCriticVqvae
 from modules import ActorCriticBarlowTwins
-from algorithm import AMPNP3O,NP3O
+from algorithm import AMPNP3O,NP3O,WAMPNP3O
 from envs.vec_env import VecEnv
 from algorithm.amp_discriminator import AMPDiscriminator
 from algorithm.datasets.motion_loader import AMPLoader, motion_layout_from_legged_cfg

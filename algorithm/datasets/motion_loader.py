@@ -507,8 +507,9 @@ class AMPLoader:
                 dim=1,
             )
         elif self.amp_feed_forward_style == "d1h_pg_without_wheel_pos":
-            # 新风格：包含 project_gravity (3维)，去掉 wheel/foot 相关，适用于 height35_pg 数据集
-            # 专家特征： joint_pos(部分) + linear_vel + angular_vel + project_gravity + joint_vel + root_z
+            # 风格：包含 project_gravity (3维)，适用于 height40_pg_tau/height35_pg 数据集
+            # 专家特征维度=30：部分 joint_pos(6) + project_gravity(3) + 后续到 joint_vel(20 incl. tar_toe/vels) + root_z(1)
+            # 注意：与 env.get_amp_observations() 中的 foot_pos 计算对应（维度匹配即可）
             if self.joint_pos_size != 8 or self.project_gravity_size != 3:
                 raise ValueError(
                     "d1h_pg_without_wheel_pos 需要 joint_pos_size=8 和 project_gravity_size=3"
@@ -601,12 +602,11 @@ class AMPLoader:
         elif self.amp_feed_forward_style == "d1h_without_wheelpos_angVel":
             return traj_w + 1 - 2 - 3
         elif self.amp_feed_forward_style == "d1h_pg_without_wheel_pos":
-            # 对于 d1h_pg_without_wheel_pos 风格，traj_w 包含了 project_gravity (3维)，
-            # expert_features 包含 root_z 和选择的观测，推荐在 cfg.env.amp_motion_layout 中显式设置 amp_observation_dim
+            # d1h_pg_without_wheel_pos 风格：实际专家特征维度为 30 (6 jpos + 3 pg + 6 foot + 3+3 vel + 8 jvel + 1 z)
+            # 数据集全帧(52)与 AMP 特征维度不同，通过 cfg.env.amp_motion_layout.amp_observation_dim=30 显式指定
             if self._amp_observation_dim_override is not None:
                 return int(self._amp_observation_dim_override)
-            # 保守计算：假设与 d1h_without_wheel_pos 类似 (去除 ~4 维 wheel/foot 相关)
-            return traj_w + 1 - 2
+            return 30
         elif self.amp_feed_forward_style == "d1h_pg_without_wheel_foot_pos":
             return traj_w + 1 - 2 - 6
         elif self.amp_feed_forward_style == "d1h_pg_tau_without_wheel_pos":

@@ -126,7 +126,7 @@ def play(args):
         actions = policy.act_teacher(obs.half())
         # actions = torch.clamp(actions,-1.2,1.2)
         # actions = policy(obs.detach())
-        if train_cfg.runner.runner_class_name == "AMPOnConstraintPolicyRunner":
+        if train_cfg.runner.runner_class_name == "AMPOnConstraintPolicyRunner" or train_cfg.runner.runner_class_name == "WAMPOnConstraintPolicyRunner":
             obs, privileged_obs, rewards,costs,dones, infos, _, _ = env.step(actions)
         else:
             obs, privileged_obs, rewards,costs,dones, infos = env.step(actions)
