@@ -626,6 +626,7 @@ class D1HFlatCfgPPO( LeggedRobotCfgPPO ):
 
         teacher_act = True
         imi_flag = True
+        # imi_flag = False
       
     class runner( LeggedRobotCfgPPO.runner ):
         run_name = ''

@@ -20,7 +20,7 @@ from algorithm.wamp_discriminator import WAMPDiscriminator
 
 # 用户放置 d1h 动作数据后自动加载；若目录为空需先创建并放入 .txt
 # 支持 height35_pg (带 project_gravity) 数据集
-MOTION_FILES_D1H = glob.glob("resources/d1h/datasets/height35_pg/*.txt")
+MOTION_FILES_D1H = glob.glob("resources/d1h/datasets/height35/*.txt")
 
 
 class D1HAMPFlat(D1HFlat):
@@ -411,7 +411,7 @@ class D1HAMPFlatCfg(D1HFlatCfg):
         class amp_motion_layout:
             pos_size = 3
             rot_size = 4
-            project_gravity_size = 3
+            # project_gravity_size = 3
             joint_pos_size = 8
             joint_vel_size = 8
             # joint_tau_size = 8
@@ -419,10 +419,10 @@ class D1HAMPFlatCfg(D1HFlatCfg):
             tar_toe_vel_local_size = 6
             linear_vel_size = 3
             angular_vel_size = 3
-            amp_feed_forward_style = "d1h_pg_without_wheel_pos"
+            amp_feed_forward_style = "d1h_without_wheel_pos"
             # 数据集读取维度(52)与 AMP 特征使用维度(30)不同，通过 amp_observation_dim 显式指定匹配 get_amp_observations 返回的维度
             # 当前风格下专家特征维度为 30，可避免 normalize_torch 中的形状不匹配 (30 vs 38)
-            amp_observation_dim = 30
+            amp_observation_dim = 27
             
     class asset( D1HFlatCfg.asset ):
         file = '{ROOT_DIR}/resources/d1h/urdf/robot.urdf'
@@ -518,7 +518,7 @@ class D1HWAMPFlatCfg(D1HAMPFlatCfg):
         class amp_motion_layout:
             pos_size = 3
             rot_size = 4
-            project_gravity_size = 3
+            # project_gravity_size = 3
             joint_pos_size = 8
             joint_vel_size = 8
             # joint_tau_size = 8
@@ -526,9 +526,9 @@ class D1HWAMPFlatCfg(D1HAMPFlatCfg):
             tar_toe_vel_local_size = 6
             linear_vel_size = 3
             angular_vel_size = 3
-            amp_feed_forward_style = "d1h_pg_without_wheel_pos"
+            amp_feed_forward_style = "d1h_without_wheel_pos"
             # 与 AMP 配置一致，显式设置维度 30 以匹配 env.get_amp_observations()
-            amp_observation_dim = 30
+            amp_observation_dim = 27
 
 
 class D1HWAMPFlatCfg_Play(D1HWAMPFlatCfg):
