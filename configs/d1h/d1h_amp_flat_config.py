@@ -20,8 +20,8 @@ from algorithm.wamp_discriminator import WAMPDiscriminator
 
 # 用户放置 d1h 动作数据后自动加载；若目录为空需先创建并放入 .txt
 # 支持 height35_pg (带 project_gravity) 数据集
-MOTION_FILES_D1H = glob.glob("resources/d1h/datasets/height35/*.txt")
-
+MOTION_FILES_D1H_AMP = glob.glob("resources/d1h/datasets/height35/*.txt")
+MOTION_FILES_D1H_WAMP = glob.glob("resources/d1h/datasets/height35/*.txt")
 
 class D1HAMPFlat(D1HFlat):
     """与 D1AMPFlat 类似，适配 8 DOF 与双足 AMP 观测维度。"""
@@ -405,7 +405,7 @@ class D1HAMPFlatCfg(D1HFlatCfg):
     class env(D1HFlatCfg.env):
         reference_state_initialization = True
         reference_state_initialization_prob = 1.0
-        amp_motion_files = MOTION_FILES_D1H
+        amp_motion_files = MOTION_FILES_D1H_AMP
         baseline_mode = False
 
         class amp_motion_layout:
@@ -489,7 +489,7 @@ class D1HAMPFlatCfgPPO(D1HFlatCfgPPO):
         resume_path = ""
 
         amp_reward_coef = 0.5
-        amp_motion_files = MOTION_FILES_D1H
+        amp_motion_files = MOTION_FILES_D1H_AMP
         amp_num_preload_transitions = 6000000
         amp_task_reward_lerp = 0.5
         amp_reward_scale = 0.25
@@ -513,7 +513,7 @@ class D1HWAMPFlatCfg(D1HAMPFlatCfg):
     class env(D1HAMPFlatCfg.env):
         reference_state_initialization = True
         reference_state_initialization_prob = 1.0
-        amp_motion_files = MOTION_FILES_D1H
+        amp_motion_files = MOTION_FILES_D1H_WAMP
 
         class amp_motion_layout:
             pos_size = 3
@@ -579,7 +579,7 @@ class D1HWAMPFlatCfgPPO(D1HAMPFlatCfgPPO):
         resume_path = ""
 
         amp_reward_coef = 0.25
-        amp_motion_files = MOTION_FILES_D1H
+        amp_motion_files = MOTION_FILES_D1H_WAMP
         amp_num_preload_transitions = 6000000
         amp_task_reward_lerp = 0.5
         amp_reward_scale = 0.25
