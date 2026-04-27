@@ -403,6 +403,10 @@ class D1HFlat(LeggedRobot):
     def _reward_dof_thigh_vel(self):
         return torch.sum(torch.square(self.dof_vel[:, self.thigh_joint_indices]), dim=1)
     
+    def _reward_orientation(self):
+        # Penalize non flat base orientation
+        return torch.sum(torch.square(self.cfg.rewards.orientation_scale * self.projected_gravity[:, :2]), dim=1)
+    
     # # ------------ cost functions----------------
     def _cost_hip_pos(self):
         return torch.sum(torch.square(self.dof_pos[:, self.hip_joint_indices] - 0.0),dim=-1)
@@ -528,6 +532,7 @@ class D1HFlatCfg( LeggedRobotCfg ):
         tracking_sigma = 0.25  # tracking reward = exp(-error^2/sigma)
         tracking_sigma_ang_vel = 0.25
         distance_sigma = 0.1  # distance reward = exp(-distance^2/sigma)
+        orientation_scale = 1.0
         soft_dof_pos_limit = 0.9  # percentage of urdf limits, values above this limit are penalized
         soft_dof_vel_limit = 0.9
         soft_torque_limit = 0.9
@@ -626,6 +631,7 @@ class D1HFlatCfgPPO( LeggedRobotCfgPPO ):
 
         teacher_act = True
         imi_flag = True
+        # imi_flag = False
       
     class runner( LeggedRobotCfgPPO.runner ):
         run_name = ''

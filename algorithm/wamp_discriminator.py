@@ -16,6 +16,7 @@ class WAMPDiscriminator(nn.Module):
         amp_reward_coef,
         hidden_layer_sizes=[1024, 512, 256],
         device="cuda",
+        soft_bound_scale=0.3,
         lambda_gp=10.0,
         task_reward_lerp=0.0,
         amp_reward_scale=0.25,
@@ -24,19 +25,27 @@ class WAMPDiscriminator(nn.Module):
         self.device = device
         self.input_dim = input_dim
         self.amp_reward_coef = amp_reward_coef
+        self.soft_bound_scale = soft_bound_scale
         self.lambda_gp = lambda_gp
         self.task_reward_lerp = task_reward_lerp
         self.amp_reward_scale = amp_reward_scale
 
         # Build trunk network (same as AMP but without final linear for flexibility)
-        layers = []
-        curr_dim = input_dim
+        # layers = []
+        # curr_dim = input_dim
+        # for hidden_dim in hidden_layer_sizes:
+        #     layers.append(nn.Linear(curr_dim, hidden_dim))
+        #     layers.append(nn.LayerNorm(hidden_dim))  # Better for WGAN stability
+        #     layers.append(nn.LeakyReLU(0.2))
+        #     curr_dim = hidden_dim
+        # self.trunk = nn.Sequential(*layers).to(device)
+        amp_layers = []
+        curr_in_dim = input_dim
         for hidden_dim in hidden_layer_sizes:
-            layers.append(nn.Linear(curr_dim, hidden_dim))
-            layers.append(nn.LayerNorm(hidden_dim))  # Better for WGAN stability
-            layers.append(nn.LeakyReLU(0.2))
-            curr_dim = hidden_dim
-        self.trunk = nn.Sequential(*layers).to(device)
+            amp_layers.append(nn.Linear(curr_in_dim, hidden_dim))
+            amp_layers.append(nn.ReLU())
+            curr_in_dim = hidden_dim
+        self.trunk = nn.Sequential(*amp_layers).to(device)
 
         self.output_layer = nn.Linear(hidden_layer_sizes[-1], 1).to(device)
 
@@ -77,17 +86,17 @@ class WAMPDiscriminator(nn.Module):
         # Compute gradient penalty
         gradients = gradients.view(batch_size, -1)
         gradient_norm = gradients.norm(2, dim=1)
-        gradient_penalty = lambda_gp * ((gradient_norm - 1) ** 2).mean()
+        gradient_penalty = lambda_gp * (torch.clamp(gradient_norm - 1, min=0) ** 2).mean()
 
         return gradient_penalty
 
     def compute_wasserstein_loss(self, real_scores, fake_scores):
-        """Wasserstein loss: E[D(real)] - E[D(fake)]"""
-        w_loss = fake_scores.mean() - real_scores.mean()
+        """Wasserstein loss: - E[tanh(n*D_real)] + E[tanh(n*D_fake)]"""
+        w_loss = (torch.tanh(self.soft_bound_scale * fake_scores)).mean() - (torch.tanh(self.soft_bound_scale * real_scores)).mean()
         return w_loss
 
     def predict_amp_reward(
-        self, state, next_state, task_reward, normalizer=None, use_wasserstein=True
+        self, state, next_state, task_reward, normalizer=None
     ):
         """Predict imitation reward based on Wasserstein critic score"""
         with torch.no_grad():
@@ -98,16 +107,11 @@ class WAMPDiscriminator(nn.Module):
 
             combined = torch.cat([state, next_state], dim=-1)
             d = self.forward(combined)
-
-            if use_wasserstein:
-                # For Wasserstein, reward is typically based on how close to expert
-                # We can map higher critic score (more "real") to higher reward
-                amp_reward = self.amp_reward_coef * torch.sigmoid(d) * 2.0  # scale to [0,2] range
-            else:
-                # Fallback to original AMP style
-                amp_reward = self.amp_reward_coef * torch.clamp(
-                    1.0 - self.amp_reward_scale * torch.square(d - 1.0), min=0.0
-                )
+            
+            # For Wasserstein, reward is typically based on how close to expert
+            # We can map higher critic score (more "real") to higher reward
+            # amp_reward = self.amp_reward_coef * torch.sigmoid(d) * 2.0  # scale to [0,2] range
+            amp_reward = self.amp_reward_coef * torch.exp(d)
 
             if self.task_reward_lerp > 0.0:
                 reward = (1.0 - self.task_reward_lerp) * amp_reward + self.task_reward_lerp * task_reward.unsqueeze(-1)
