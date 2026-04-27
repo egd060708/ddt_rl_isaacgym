@@ -65,14 +65,12 @@ class D1AMPFlat(D1Flat):
 
     def get_amp_observations(self):
         joint_pos = self.dof_pos[:,self.foot_joint_mask]
-        foot_pos, foot_vel = self._get_feet_local_pos_vel()
+        foot_pos, _foot_vel = self._get_feet_local_pos_vel()
         base_lin_vel = self.base_lin_vel
         base_ang_vel = self.base_ang_vel
-        joint_vel = self.dof_vel[:,self.foot_joint_mask]
-        # joint_vel = self.dof_vel[:,self.foot_joint_mask]
+        joint_vel = self.dof_vel
         z_pos = self.root_states[:, 2:3]
-        # return torch.cat((joint_pos, foot_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos), dim=-1)
-        return torch.cat((joint_pos, foot_pos, base_lin_vel, joint_vel, z_pos), dim=-1)
+        return torch.cat((joint_pos, foot_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos), dim=-1)
 
     def _reset_dofs_amp(self, env_ids, frames):
         """ Resets DOF position and velocities of selected environmments
@@ -263,7 +261,7 @@ class D1AMPFlat(D1Flat):
 
 class D1AMPFlatCfg(D1FlatCfg):
     class env(D1FlatCfg.env):
-        reference_state_initialization = False
+        reference_state_initialization = True
         reference_state_initialization_prob = 0.85
         amp_motion_files = MOTION_FILES
 
@@ -296,6 +294,9 @@ class D1AMPFlatCfg(D1FlatCfg):
             lin_vel_y = [-1.0, 1.0]  # min max [m/s]
             ang_vel_yaw = [-1, 1]  # min max [rad/s]
             heading = [-3.14, 3.14]
+
+    class asset(D1FlatCfg.asset):
+        terminate_after_contacts_on = ["base"]
 
     class rewards( D1FlatCfg.rewards ):
         class scales( D1FlatCfg.rewards.scales ):
@@ -376,7 +377,6 @@ class D1AMPFlatCfg_Play(D1AMPFlatCfg):
         randomize_base_mass = False
         randomize_motor = False
         randomize_lag_timesteps = False
-        randomize_friction = False
         randomize_restitution = False
         disturbance = False
         randomize_kpkd = False
@@ -384,14 +384,19 @@ class D1AMPFlatCfg_Play(D1AMPFlatCfg):
         heading_command = False  # if true: compute ang vel command from heading error
         resampling_time = 2.
         class ranges:
-            lin_vel_x = [0.0, 0.0]  # min max [m/s]
-            lin_vel_y = [0.1, 0.1]  # min max [m/s]
-            ang_vel_yaw = [-0, 0]  # min max [rad/s]
-            heading = [-0.0, 0.0]
+            # lin_vel_x = [1.0, 1.0]  # min max [m/s]
+            # lin_vel_y = [0.1, 0.1]  # min max [m/s]
+            # ang_vel_yaw = [-0, 0]  # min max [rad/s]
+            # heading = [-0.0, 0.0]
+            lin_vel_x = [-1.5, 1.5]  # min max [m/s]
+            lin_vel_y = [-1.0, 1.0]  # min max [m/s]
+            ang_vel_yaw = [-1, 1]  # min max [rad/s]
+            heading = [-3.14, 3.14]
 
 class D1AMPFlatCfgPPO(D1FlatCfgPPO):
     class algorithm( D1FlatCfgPPO.algorithm ):
         amp_replay_buffer_size = 1000000
+        update_amp_normalizer_with_raw = False
 
     class runner( D1FlatCfgPPO.runner ):
         run_name = ''
@@ -400,15 +405,16 @@ class D1AMPFlatCfgPPO(D1FlatCfgPPO):
         # policy_class_name = 'ActorCriticTransBarlowTwins'
         runner_class_name = 'AMPOnConstraintPolicyRunner'
         algorithm_class_name = 'AMPNP3O'
-        max_iterations = 6000
+        max_iterations = 10000
         num_steps_per_env = 24
         resume = False
         resume_path = ''
 
-        amp_reward_coef = 0.005
+        amp_reward_coef = 0.05
         amp_motion_files = MOTION_FILES
         amp_num_preload_transitions = 2000000
         amp_task_reward_lerp = 0.5
+        amp_reward_scale = 0.25
         amp_discr_hidden_dims = [1024, 512]
 
         min_normalized_std = [0.05, 0.02, 0.05, 0.1] * 4

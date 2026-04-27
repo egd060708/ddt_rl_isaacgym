@@ -37,6 +37,7 @@ class AMPNP3O:
                  min_std=None,
                  dagger_update_freq=20,
                  priv_reg_coef_schedual = [0, 0, 0],
+                 update_amp_normalizer_with_raw=False,
                  **kwargs
                  ):
 
@@ -46,6 +47,7 @@ class AMPNP3O:
         self.schedule = schedule
         self.learning_rate = learning_rate
         self.min_std = min_std
+        self.update_amp_normalizer_with_raw = update_amp_normalizer_with_raw
 
         # Discriminator components
         self.discriminator = discriminator
@@ -293,6 +295,8 @@ class AMPNP3O:
                 # Discriminator loss.
                 policy_state, policy_next_state = sample_amp_policy
                 expert_state, expert_next_state = sample_amp_expert
+                policy_state_raw = policy_state
+                expert_state_raw = expert_state
                 if self.amp_normalizer is not None:
                     with torch.no_grad():
                         policy_state = self.amp_normalizer.normalize_torch(policy_state, self.device)
@@ -344,8 +348,12 @@ class AMPNP3O:
                     self.actor_critic.std.data = self.actor_critic.std.data.clamp(min=self.min_std)
 
                 if self.amp_normalizer is not None:
-                    self.amp_normalizer.update(policy_state.cpu().numpy())
-                    self.amp_normalizer.update(expert_state.cpu().numpy())
+                    if self.update_amp_normalizer_with_raw:
+                        self.amp_normalizer.update(policy_state_raw.cpu().numpy())
+                        self.amp_normalizer.update(expert_state_raw.cpu().numpy())
+                    else:
+                        self.amp_normalizer.update(policy_state.cpu().numpy())
+                        self.amp_normalizer.update(expert_state.cpu().numpy())
 
                 mean_value_loss += value_loss.item()
                 mean_cost_value_loss += cost_value_loss.item()
