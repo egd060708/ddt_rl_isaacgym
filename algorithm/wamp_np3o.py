@@ -299,6 +299,8 @@ class WAMPNP3O:
             # === Wasserstein Discriminator Loss (replaces MSE in amp_np3o) ===
             policy_state, policy_next_state = sample_amp_policy
             expert_state, expert_next_state = sample_amp_expert
+            policy_state_raw = policy_state
+            expert_state_raw = expert_state
 
             if self.amp_normalizer is not None:
                 with torch.no_grad():
@@ -338,8 +340,8 @@ class WAMPNP3O:
                 self.actor_critic.std.data = self.actor_critic.std.data.clamp(min=self.min_std)
 
             if self.amp_normalizer is not None:
-                self.amp_normalizer.update(policy_state.cpu().numpy())
-                self.amp_normalizer.update(expert_state.cpu().numpy())
+                self.amp_normalizer.update(policy_state_raw.cpu().numpy())
+                self.amp_normalizer.update(expert_state_raw.cpu().numpy())
 
             mean_value_loss += value_loss.item()
             mean_cost_value_loss += cost_value_loss.item()
@@ -375,4 +377,16 @@ class WAMPNP3O:
 
         self.storage.clear()
 
-        return mean_value_loss,mean_cost_value_loss,mean_viol_loss,mean_surrogate_loss,mean_imitation_loss,mean_w_loss,mean_gp_loss,mean_policy_pred,mean_expert_pred,obs_batch_max,obs_batch_min,
+        return {
+            "value_loss": mean_value_loss,
+            "cost_value_loss": mean_cost_value_loss,
+            "viol_loss": mean_viol_loss,
+            "surrogate_loss": mean_surrogate_loss,
+            "imitation_loss": mean_imitation_loss,
+            "w_loss": mean_w_loss,
+            "gp_loss": mean_gp_loss,
+            "policy_score": mean_policy_pred,
+            "expert_score": mean_expert_pred,
+            "obs_max": obs_batch_max,
+            "obs_min": obs_batch_min,
+        }

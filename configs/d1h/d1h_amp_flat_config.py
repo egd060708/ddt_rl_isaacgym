@@ -21,7 +21,7 @@ from algorithm.wamp_discriminator import WAMPDiscriminator
 # 用户放置 d1h 动作数据后自动加载；若目录为空需先创建并放入 .txt
 # 支持 height35_pg (带 project_gravity) 数据集
 MOTION_FILES_D1H_AMP = glob.glob("resources/d1h/datasets/height35/*.txt")
-MOTION_FILES_D1H_WAMP = glob.glob("resources/d1h/datasets/height35/*.txt")
+MOTION_FILES_D1H_WAMP = glob.glob("resources/d1h/datasets/height35_pg/*.txt")
 
 class D1HAMPFlat(D1HFlat):
     """与 D1AMPFlat 类似，适配 8 DOF 与双足 AMP 观测维度。"""
@@ -431,7 +431,7 @@ class D1HAMPFlatCfg(D1HFlatCfg):
         penalize_contacts_on = ["thigh", "calf", "base"]
         penalize_contact_head_on = ["base"]
         # terminate_after_contacts_on = ["thigh", "calf", "base"]
-        terminate_after_contacts_on = []
+        terminate_after_contacts_on = ["base"]
         self_collisions = 0 # 1 to disable, 0 to enable...bitwise filter
         replace_cylinder_with_capsule = False  # replace collision cylinders with capsules, leads to faster/more stable simulation
         flip_visual_attachments = False
@@ -518,7 +518,7 @@ class D1HWAMPFlatCfg(D1HAMPFlatCfg):
         class amp_motion_layout:
             pos_size = 3
             rot_size = 4
-            # project_gravity_size = 3
+            project_gravity_size = 3
             joint_pos_size = 8
             joint_vel_size = 8
             # joint_tau_size = 8
@@ -526,9 +526,9 @@ class D1HWAMPFlatCfg(D1HAMPFlatCfg):
             tar_toe_vel_local_size = 6
             linear_vel_size = 3
             angular_vel_size = 3
-            amp_feed_forward_style = "d1h_without_wheel_pos"
+            amp_feed_forward_style = "d1h_pg_without_wheel_pos"
             # 与 AMP 配置一致，显式设置维度 30 以匹配 env.get_amp_observations()
-            amp_observation_dim = 27
+            amp_observation_dim = 30
 
 
 class D1HWAMPFlatCfg_Play(D1HWAMPFlatCfg):
@@ -557,8 +557,8 @@ class D1HWAMPFlatCfg_Play(D1HWAMPFlatCfg):
         heading_command = False
         resampling_time = 2.0
         class ranges:
-            lin_vel_x = [0.0, 0.0]
-            lin_vel_y = [0.0, 0.0]
+            lin_vel_x = [-1.0, 1.0]
+            lin_vel_y = [-1.0, 1.0]
             ang_vel_yaw = [0, 0]
             heading = [-3.14, 3.14]
 

@@ -58,6 +58,10 @@ class WAMPDiscriminator(nn.Module):
         d = self.output_layer(h)
         return d
 
+    def soft_bound_score(self, score):
+        """Keep Wasserstein scores finite before exponentiating them into rewards."""
+        return torch.tanh(self.soft_bound_scale * score) / self.soft_bound_scale
+
     def compute_gradient_penalty(self, real_data, fake_data, lambda_gp=None):
         """Standard WGAN-GP gradient penalty on interpolated samples"""
         if lambda_gp is None:
@@ -91,8 +95,10 @@ class WAMPDiscriminator(nn.Module):
         return gradient_penalty
 
     def compute_wasserstein_loss(self, real_scores, fake_scores):
-        """Wasserstein loss: - E[tanh(n*D_real)] + E[tanh(n*D_fake)]"""
-        w_loss = (torch.tanh(self.soft_bound_scale * fake_scores)).mean() - (torch.tanh(self.soft_bound_scale * real_scores)).mean()
+        """Wasserstein critic objective: raise expert scores and lower policy scores."""
+        real_scores = self.soft_bound_score(real_scores)
+        fake_scores = self.soft_bound_score(fake_scores)
+        w_loss = fake_scores.mean() - real_scores.mean()
         return w_loss
 
     def predict_amp_reward(
@@ -107,11 +113,11 @@ class WAMPDiscriminator(nn.Module):
 
             combined = torch.cat([state, next_state], dim=-1)
             d = self.forward(combined)
+            bounded_d = self.soft_bound_score(d)
             
-            # For Wasserstein, reward is typically based on how close to expert
-            # We can map higher critic score (more "real") to higher reward
-            # amp_reward = self.amp_reward_coef * torch.sigmoid(d) * 2.0  # scale to [0,2] range
-            amp_reward = self.amp_reward_coef * torch.exp(d)
+            # WAMP turns higher critic scores into stronger imitation rewards.
+            # The soft bound keeps exp(score) from dominating task reward.
+            amp_reward = self.amp_reward_coef * torch.exp(bounded_d)
 
             if self.task_reward_lerp > 0.0:
                 reward = (1.0 - self.task_reward_lerp) * amp_reward + self.task_reward_lerp * task_reward.unsqueeze(-1)
@@ -120,4 +126,3 @@ class WAMPDiscriminator(nn.Module):
 
             self.train()
         return reward.squeeze(-1), amp_reward.squeeze(-1), task_reward, d.squeeze(-1)
-

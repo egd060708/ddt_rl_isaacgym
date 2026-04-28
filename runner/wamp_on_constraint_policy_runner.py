@@ -1,7 +1,6 @@
 import os
 import time
 from collections import deque
-import warnings
 
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
@@ -13,7 +12,6 @@ from algorithm.wamp_np3o import WAMPNP3O
 from algorithm.wamp_discriminator import WAMPDiscriminator
 from algorithm.datasets.motion_loader import AMPLoader, motion_layout_from_legged_cfg
 from utils import Normalizer, get_load_path
-from utils.helpers import class_to_dict
 from envs.vec_env import VecEnv
 
 
@@ -68,7 +66,7 @@ class WAMPOnConstraintPolicyRunner:
             motion_layout=_ml if _ml else None,
         )
 
-        self.amp_normalizer = Normalizer(self.amp_data.observation_dim, self.device)
+        self.amp_normalizer = Normalizer(self.amp_data.observation_dim)
 
         # Create WGAN-GP Discriminator (Wasserstein version)
         self.discriminator = WAMPDiscriminator(
@@ -82,7 +80,9 @@ class WAMPOnConstraintPolicyRunner:
         ).to(self.device)
 
         # Create WAMPNP3O algorithm
-        self.alg_cfg['k_value'] = getattr(self.env, 'cost_k_values', torch.tensor([0.1], device=self.device))
+        self.alg_cfg['k_value'] = getattr(
+            self.env, 'cost_k_values', torch.tensor([0.1], device=self.device)
+        )
 
         min_std = None
         if hasattr(self.env, 'amp_min_std_limit') and self.env.amp_min_std_limit is not None:
@@ -96,20 +96,7 @@ class WAMPOnConstraintPolicyRunner:
             discriminator=self.discriminator,
             amp_data=self.amp_data,
             amp_normalizer=self.amp_normalizer,
-            k_value=self.env.cost_k_values if hasattr(self.env, 'cost_k_values') else torch.tensor([0.1]),
-            num_learning_epochs=self.cfg.get("num_learning_epochs", 5),
-            num_mini_batches=self.cfg.get("num_mini_batches", 4),
-            clip_param=self.cfg.get("clip_param", 0.2),
-            gamma=self.cfg.get("gamma", 0.998),
-            lam=self.cfg.get("lam", 0.95),
-            value_loss_coef=self.cfg.get("value_loss_coef", 1.0),
-            cost_value_loss_coef=self.cfg.get("cost_value_loss_coef", 0.1),
-            cost_viol_loss_coef=self.cfg.get("cost_viol_loss_coef", 0.1),
-            entropy_coef=self.cfg.get("entropy_coef", 0.01),
-            learning_rate=self.cfg.get("learning_rate", 1e-3),
-            max_grad_norm=self.cfg.get("max_grad_norm", 1.0),
             device=self.device,
-            amp_replay_buffer_size=self.cfg.get("amp_replay_buffer_size", 1000000),
             wasserstein_lambda=self.cfg.get("wasserstein_lambda", 10.0),
             min_std=min_std,
             **self.alg_cfg
@@ -131,7 +118,10 @@ class WAMPOnConstraintPolicyRunner:
 
         self.env.reset()
 
-        print(f"WAMP Runner initialized with {len(self.amp_data.motion_files)} expert motions using Wasserstein Adversarial Imitation.")
+        print(
+            f"WAMP Runner initialized with {len(self.amp_data.trajectory_names)} "
+            "expert motions using Wasserstein Adversarial Imitation."
+        )
 
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         if self.log_dir is not None and self.writer is None:
@@ -230,13 +220,41 @@ class WAMPOnConstraintPolicyRunner:
         return self.actor_critic
 
     def _log(self, locals_dict, it):
-        """Simple logging for WAMP"""
         train_info = locals_dict.get('train_info', {})
-        print(f"[WAMP Iter {it}] "
-              f"Value Loss: {train_info.get('value_loss', 0):.4f} | "
-              f"W Loss: {train_info.get('w_loss', 0):.4f} | "
-              f"GP: {train_info.get('gp_loss', 0):.4f} | "
-              f"Surrogate: {train_info.get('surrogate_loss', 0):.4f}")
+        collection_time = locals_dict.get('collection_time', 0.0)
+        learn_time = locals_dict.get('learn_time', 0.0)
+        iteration_time = collection_time + learn_time
+        self.tot_time += iteration_time
+        self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
+
+        if self.writer is not None:
+            self.writer.add_scalar('Loss/value_function', train_info['value_loss'], it)
+            self.writer.add_scalar('Loss/cost_value_function', train_info['cost_value_loss'], it)
+            self.writer.add_scalar('Loss/surrogate', train_info['surrogate_loss'], it)
+            self.writer.add_scalar('Loss/mean_viol_loss', train_info['viol_loss'], it)
+            self.writer.add_scalar('Loss/WAMP_wasserstein', train_info['w_loss'], it)
+            self.writer.add_scalar('Loss/WAMP_gp', train_info['gp_loss'], it)
+            self.writer.add_scalar('WAMP/policy_score', train_info['policy_score'], it)
+            self.writer.add_scalar('WAMP/expert_score', train_info['expert_score'], it)
+            self.writer.add_scalar('Data/obs_max', train_info['obs_max'], it)
+            self.writer.add_scalar('Data/obs_min', train_info['obs_min'], it)
+
+            if len(locals_dict['amp_rewbuffer']) > 0:
+                self.writer.add_scalar('Train/mean_amp_reward', np.mean(locals_dict['amp_rewbuffer']), it)
+                self.writer.add_scalar('Train/mean_task_reward', np.mean(locals_dict['task_rewbuffer']), it)
+                self.writer.add_scalar('Train/mean_total_reward', np.mean(locals_dict['total_rewbuffer']), it)
+                self.writer.add_scalar('Train/mean_episode_length', np.mean(locals_dict['lenbuffer']), it)
+
+        print(
+            f"[WAMP Iter {it}] "
+            f"value {train_info['value_loss']:.4f} | "
+            f"surrogate {train_info['surrogate_loss']:.4f} | "
+            f"w_loss {train_info['w_loss']:.4f} | "
+            f"gp {train_info['gp_loss']:.4f} | "
+            f"policy_score {train_info['policy_score']:.4f} | "
+            f"expert_score {train_info['expert_score']:.4f} | "
+            f"time {iteration_time:.2f}s"
+        )
 
     def get_inference_policy(self, device=None):
         if device is None:
@@ -245,11 +263,29 @@ class WAMPOnConstraintPolicyRunner:
         self.actor_critic.eval()
         return self.actor_critic.act_inference
 
-    def save(self, path):
+    def save(self, path, infos=None):
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        self.alg.save(path)
-        print(f"Saved WAMP model to {path}")
+        state_dict = {
+            'model_state_dict': self.alg.actor_critic.state_dict(),
+            'optimizer_state_dict': self.alg.optimizer.state_dict(),
+            'discriminator_state_dict': self.alg.discriminator.state_dict(),
+            'amp_normalizer': self.alg.amp_normalizer,
+            'iter': self.current_learning_iteration,
+            'infos': infos,
+        }
+        torch.save(state_dict, path)
 
-    def load(self, path):
-        self.alg.load(path)
-        print(f"Loaded WAMP model from {path}")
+    def load(self, path, load_optimizer=True):
+        print("*" * 80)
+        print(f"Loading WAMP model from {path}...")
+        loaded_dict = torch.load(path, map_location=self.device)
+        self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
+        if 'discriminator_state_dict' in loaded_dict:
+            self.alg.discriminator.load_state_dict(loaded_dict['discriminator_state_dict'])
+        if 'amp_normalizer' in loaded_dict:
+            self.alg.amp_normalizer = loaded_dict['amp_normalizer']
+        if load_optimizer and 'optimizer_state_dict' in loaded_dict:
+            self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
+        self.current_learning_iteration = loaded_dict.get('iter', 0)
+        print("*" * 80)
+        return loaded_dict.get('infos')
