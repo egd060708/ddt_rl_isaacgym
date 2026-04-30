@@ -3,8 +3,8 @@ import time
 from collections import deque
 
 import numpy as np
-from torch.utils.tensorboard import SummaryWriter
 import torch
+from torch.utils.tensorboard import SummaryWriter
 
 from global_config import ROOT_DIR
 from modules import ActorCriticBarlowTwins
@@ -74,6 +74,7 @@ class WAMPOnConstraintPolicyRunner:
             amp_reward_coef=self.cfg.get("amp_reward_coef", 1.0),
             hidden_layer_sizes=self.cfg.get("amp_discr_hidden_dims", [1024, 512, 256]),
             device=self.device,
+            soft_bound_scale=self.cfg.get("wamp_soft_bound_scale", 0.3),
             lambda_gp=self.cfg.get("wasserstein_lambda", 10.0),
             task_reward_lerp=self.cfg.get("amp_task_reward_lerp", 0.3),
             amp_reward_scale=self.cfg.get("amp_reward_scale", 0.25),
@@ -156,6 +157,7 @@ class WAMPOnConstraintPolicyRunner:
         tot_iter = self.current_learning_iteration + num_learning_iterations
 
         for it in range(self.current_learning_iteration, tot_iter):
+            iter_start = time.time()
             start = time.time()
 
             with torch.inference_mode():
@@ -208,11 +210,29 @@ class WAMPOnConstraintPolicyRunner:
 
             learn_time = time.time() - start
 
+            log_time = 0.0
             if self.log_dir is not None:
+                log_start = time.time()
                 self._log(locals(), it)
+                log_time = time.time() - log_start
+                ep_infos.clear()
 
+            save_time = 0.0
             if it % self.cfg.get("save_interval", 50) == 0:
+                save_start = time.time()
                 self.save(os.path.join(self.log_dir, f'model_{it}.pt'))
+                save_time = time.time() - save_start
+
+            total_iter_time = time.time() - iter_start
+            if log_time > 0.5 or save_time > 0.5 or total_iter_time > collection_time + learn_time + 0.5:
+                print(
+                    f"[WAMP Iter {it} timing] "
+                    f"rollout {collection_time:.2f}s | "
+                    f"learn {learn_time:.2f}s | "
+                    f"log {log_time:.2f}s | "
+                    f"save {save_time:.2f}s | "
+                    f"total {total_iter_time:.2f}s"
+                )
 
             self.current_learning_iteration += 1
 
@@ -228,6 +248,24 @@ class WAMPOnConstraintPolicyRunner:
         self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
 
         if self.writer is not None:
+            ep_infos = locals_dict.get('ep_infos', [])
+            if ep_infos:
+                for key in ep_infos[0]:
+                    infotensor = torch.tensor([], device=self.device)
+                    for ep_info in ep_infos:
+                        if key not in ep_info:
+                            continue
+                        value = ep_info[key]
+                        if not torch.is_tensor(value):
+                            value = torch.tensor(value, device=self.device)
+                        infotensor = torch.cat(
+                            (infotensor, value.to(self.device).reshape(-1))
+                        )
+                    if infotensor.numel() > 0:
+                        self.writer.add_scalar(
+                            'Episode/' + key, torch.mean(infotensor), it
+                        )
+
             self.writer.add_scalar('Loss/value_function', train_info['value_loss'], it)
             self.writer.add_scalar('Loss/cost_value_function', train_info['cost_value_loss'], it)
             self.writer.add_scalar('Loss/surrogate', train_info['surrogate_loss'], it)

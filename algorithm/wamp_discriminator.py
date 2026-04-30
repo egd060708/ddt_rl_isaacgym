@@ -22,6 +22,8 @@ class WAMPDiscriminator(nn.Module):
         amp_reward_scale=0.25,
     ):
         super().__init__()
+        if soft_bound_scale <= 0.0:
+            raise ValueError("soft_bound_scale must be positive")
         self.device = device
         self.input_dim = input_dim
         self.amp_reward_coef = amp_reward_coef
@@ -58,9 +60,9 @@ class WAMPDiscriminator(nn.Module):
         d = self.output_layer(h)
         return d
 
-    def soft_bound_score(self, score):
-        """Keep Wasserstein scores finite before exponentiating them into rewards."""
-        return torch.tanh(self.soft_bound_scale * score) / self.soft_bound_scale
+    def soft_boundary(self, score):
+        """Soft-boundary term tanh(eta * D) used in the WAMP critic loss."""
+        return torch.tanh(self.soft_bound_scale * score)
 
     def compute_gradient_penalty(self, real_data, fake_data, lambda_gp=None):
         """Standard WGAN-GP gradient penalty on interpolated samples"""
@@ -96,8 +98,8 @@ class WAMPDiscriminator(nn.Module):
 
     def compute_wasserstein_loss(self, real_scores, fake_scores):
         """Wasserstein critic objective: raise expert scores and lower policy scores."""
-        real_scores = self.soft_bound_score(real_scores)
-        fake_scores = self.soft_bound_score(fake_scores)
+        real_scores = self.soft_boundary(real_scores)
+        fake_scores = self.soft_boundary(fake_scores)
         w_loss = fake_scores.mean() - real_scores.mean()
         return w_loss
 
@@ -113,11 +115,10 @@ class WAMPDiscriminator(nn.Module):
 
             combined = torch.cat([state, next_state], dim=-1)
             d = self.forward(combined)
-            bounded_d = self.soft_bound_score(d)
             
             # WAMP turns higher critic scores into stronger imitation rewards.
-            # The soft bound keeps exp(score) from dominating task reward.
-            amp_reward = self.amp_reward_coef * torch.exp(bounded_d)
+            # HumanMimic defines the rollout style reward as exp(D_theta).
+            amp_reward = self.amp_reward_coef * torch.exp(d)
 
             if self.task_reward_lerp > 0.0:
                 reward = (1.0 - self.task_reward_lerp) * amp_reward + self.task_reward_lerp * task_reward.unsqueeze(-1)

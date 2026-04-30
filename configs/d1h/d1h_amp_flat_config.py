@@ -468,7 +468,7 @@ class D1HAMPFlatCfg_Play(D1HAMPFlatCfg):
         resampling_time = 2.
         class ranges:
             lin_vel_x = [-1., 1.]  # min max [m/s]
-            lin_vel_y = [-1., 1.]  # min max [m/s]
+            lin_vel_y = [0, 0]  # min max [m/s]
             ang_vel_yaw = [-1, 1]  # min max [rad/s]
             heading = [-3.14, 3.14]
 
@@ -558,14 +558,19 @@ class D1HWAMPFlatCfg_Play(D1HWAMPFlatCfg):
         resampling_time = 2.0
         class ranges:
             lin_vel_x = [-1.0, 1.0]
-            lin_vel_y = [-1.0, 1.0]
-            ang_vel_yaw = [0, 0]
+            lin_vel_y = [0,0]
+            ang_vel_yaw = [-1., 1.]
             heading = [-3.14, 3.14]
+
+            # lin_vel_x = [0,0]
+            # lin_vel_y = [-0.5,0.5]
+            # ang_vel_yaw = [-1., 1.]
+            # heading = [0,0]
 
 
 class D1HWAMPFlatCfgPPO(D1HAMPFlatCfgPPO):
     class algorithm(D1HFlatCfgPPO.algorithm):
-        amp_replay_buffer_size = 3000000
+        amp_replay_buffer_size = 1000000
 
     class runner(D1HAMPFlatCfgPPO.runner):
         run_name = ""
@@ -580,12 +585,12 @@ class D1HWAMPFlatCfgPPO(D1HAMPFlatCfgPPO):
 
         amp_reward_coef = 0.25
         amp_motion_files = MOTION_FILES_D1H_WAMP
-        amp_num_preload_transitions = 6000000
+        amp_num_preload_transitions = 2000000
         amp_task_reward_lerp = 0.5
         amp_reward_scale = 0.25
         wasserstein_lambda = 10.0
+        wamp_soft_bound_scale = 0.3
         amp_discr_hidden_dims = [1024, 512]
 
         min_normalized_std = [0.05, 0.02, 0.05, 0.1] * 2
-
 

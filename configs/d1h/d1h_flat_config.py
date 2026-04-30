@@ -497,7 +497,7 @@ class D1HFlatCfg( LeggedRobotCfg ):
             powers = -2e-5
             termination = -100.0
             tracking_lin_vel = 0.0
-            tracking_lin_vel_x = 15
+            tracking_lin_vel_x = 0.0
             tracking_lin_vel_y = 10.0
             tracking_ang_vel = 8
             lin_vel_z = -1.0
@@ -639,7 +639,7 @@ class D1HFlatCfgPPO( LeggedRobotCfgPPO ):
         policy_class_name = 'ActorCriticBarlowTwins'
         runner_class_name = 'OnConstraintPolicyRunner'
         algorithm_class_name = 'NP3O'
-        save_interval = 2000
+        save_interval = 1000
         max_iterations = 40000
         num_steps_per_env = 24
         resume = False
